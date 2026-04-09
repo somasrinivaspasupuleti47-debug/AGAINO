@@ -22,6 +22,7 @@ interface Listing {
   condition: string;
   status: string;
   category: string;
+  subcategory: string;
   seller_id: string;
   seller_phone: string;
   location: { city: string; region: string };
