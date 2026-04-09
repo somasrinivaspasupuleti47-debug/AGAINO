@@ -1,0 +1,1 @@
+{"version":3,"file":"SearchSuggestion.d.ts","sourceRoot":"","sources":["../../../src/modules/search/SearchSuggestion.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,QAAQ,EAAU,KAAK,EAAS,MAAM,UAAU,CAAC;AAE1D,MAAM,WAAW,iBAAkB,SAAQ,QAAQ;IACjD,IAAI,EAAE,MAAM,CAAC;CACd;AAQD,eAAO,MAAM,gBAAgB,EAAE,KAAK,CAAC,iBAAiB,CAIrD,CAAC"}
