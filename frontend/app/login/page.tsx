@@ -35,7 +35,7 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-orange-50 px-4">
       <div className="bg-white rounded-2xl shadow-lg p-8 w-full max-w-md">
-        <h1 className="text-2xl font-bold text-center mb-1">Welcome Back</h1>
+        <h1 className="text-2xl font-bold text-center mb-1 text-orange-500">Welcome Back</h1>
         <p className="text-gray-400 text-center text-sm mb-6">Login to your AGAINO account</p>
 
         {/* Role Selector */}
