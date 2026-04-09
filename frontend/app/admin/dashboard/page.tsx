@@ -31,11 +31,11 @@ interface Listing {
 
 const STATUS_STYLES: Record<string, string> = {
   published: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
-  approved:  'bg-blue-500/15   text-blue-400   border-blue-500/30',
-  pending:   'bg-orange-500/15  text-orange-400  border-orange-500/30',
-  sold:      'bg-purple-500/15 text-purple-400 border-purple-500/30',
-  draft:     'bg-yellow-500/15 text-yellow-400 border-yellow-500/30',
-  deleted:   'bg-red-500/15    text-red-400    border-red-500/30',
+  approved: 'bg-blue-500/15   text-blue-400   border-blue-500/30',
+  pending: 'bg-orange-500/15  text-orange-400  border-orange-500/30',
+  sold: 'bg-purple-500/15 text-purple-400 border-purple-500/30',
+  draft: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30',
+  deleted: 'bg-red-500/15    text-red-400    border-red-500/30',
 };
 
 const STATUSES = ['all', 'approved', 'sold', 'pending', 'draft']; // Keeping pending/draft just in case, but focused on approved/sold
@@ -44,11 +44,11 @@ const CATEGORIES = ['all', 'Electronics', 'Vehicles', 'Furniture', 'Clothing', '
 export default function AdminDashboard() {
   const router = useRouter();
   const [authChecked, setAuthChecked] = useState(false);
-  const [isAdmin, setIsAdmin]         = useState(false);
-  const [listings, setListings]       = useState<Listing[]>([]);
-  const [loading, setLoading]         = useState(true);
-  const [deleting, setDeleting]       = useState<string | null>(null);
-  const [search, setSearch]           = useState('');
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [listings, setListings] = useState<Listing[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [selectedListing, setSelectedListing] = useState<Listing | null>(null);
@@ -96,9 +96,9 @@ export default function AdminDashboard() {
   /* ── Derived data ── */
   const filtered = useMemo(() => {
     return listings.filter(l => {
-      const matchSearch   = !search || l.title.toLowerCase().includes(search.toLowerCase()) ||
-                             l.location?.city?.toLowerCase().includes(search.toLowerCase());
-      const matchStatus   = statusFilter   === 'all' || l.status   === statusFilter;
+      const matchSearch = !search || l.title.toLowerCase().includes(search.toLowerCase()) ||
+        l.location?.city?.toLowerCase().includes(search.toLowerCase());
+      const matchStatus = statusFilter === 'all' || l.status === statusFilter;
       const matchCategory = categoryFilter === 'all' || l.category === categoryFilter;
       return matchSearch && matchStatus && matchCategory;
     });
@@ -111,7 +111,7 @@ export default function AdminDashboard() {
       .from('listings')
       .update({ status: 'approved' })
       .eq('_id', lid);
-    
+
     if (error) {
       alert(error.message);
     } else {
@@ -129,7 +129,7 @@ export default function AdminDashboard() {
       .from('listings')
       .update({ status: 'sold' })
       .eq('_id', lid);
-    
+
     if (error) {
       alert(error.message);
     } else {
@@ -139,12 +139,12 @@ export default function AdminDashboard() {
   };
 
   const stats = [
-    { label: 'Total Listings',  value: listings.length,                                              icon: <Package size={20} />,    color: 'from-violet-500 to-purple-600' },
-    { label: 'On Marketplace (Official)',  value: listings.filter(l => l.status === 'approved' && l.subcategory === 'OFFICIAL_MARKETPLACE').length,        icon: <CheckCircle size={20} />, color: 'from-emerald-500 to-teal-600', active: true },
-    { label: 'Sold',            value: listings.filter(l => l.status === 'sold').length,             icon: <ShoppingBag size={20} />, color: 'from-blue-500 to-indigo-600' },
-    { label: 'User Submissions (Pending)', value: listings.filter(l => l.status === 'pending').length,    icon: <Clock size={20} />,       color: 'from-orange-500 to-red-500' },
+    { label: 'Total Listings', value: listings.length, icon: <Package size={20} />, color: 'from-violet-500 to-purple-600' },
+    { label: 'On Marketplace (Official)', value: listings.filter(l => l.status === 'approved' && l.category === 'OFFICIAL_MARKETPLACE').length, icon: <CheckCircle size={20} />, color: 'from-emerald-500 to-teal-600', active: true },
+    { label: 'Sold', value: listings.filter(l => l.status === 'sold').length, icon: <ShoppingBag size={20} />, color: 'from-blue-500 to-indigo-600' },
+    { label: 'User Submissions (Pending)', value: listings.filter(l => l.status === 'pending').length, icon: <Clock size={20} />, color: 'from-orange-500 to-red-500' },
     { label: 'Approved (Internal)', value: listings.filter(l => l.status === 'approved' && l.subcategory !== 'OFFICIAL_MARKETPLACE').length, icon: <ShieldCheck size={20} />, color: 'from-amber-500 to-yellow-600' },
-    { label: 'Platform Value',  value: `₹${listings.filter(l=>l.status==='sold').reduce((s,l)=>s+(l.price||0),0).toLocaleString()}`, icon: <TrendingUp size={20} />, color: 'from-pink-500 to-rose-600' },
+    { label: 'Platform Value', value: `₹${listings.filter(l => l.status === 'sold').reduce((s, l) => s + (l.price || 0), 0).toLocaleString()}`, icon: <TrendingUp size={20} />, color: 'from-pink-500 to-rose-600' },
   ];
 
   const imgSrc = (l: Listing) => {
