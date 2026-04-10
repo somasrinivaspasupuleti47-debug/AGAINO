@@ -157,7 +157,7 @@ export default function ListingDetailPage() {
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ duration: 0.3 }}
-                  src={images[imgIdx].original.startsWith('http') ? images[imgIdx].original : `http://localhost:4000${images[imgIdx].original}`} 
+                  src={getImageUrl(images[imgIdx].original)} 
                   alt={listing.title} 
                   className="w-full h-full object-cover" 
                 />
