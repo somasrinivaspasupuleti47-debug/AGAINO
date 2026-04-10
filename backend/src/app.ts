@@ -18,7 +18,7 @@ app.use(
         scriptSrc: ["'self'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: ["'self'", 'data:', 'https:', 'http:'],
-        connectSrc: ["'self'", env.FRONTEND_URL],
+        connectSrc: ["'self'", env.FRONTEND_URL, "https://*.vercel.app"],
         fontSrc: ["'self'"],
         objectSrc: ["'none'"],
         frameSrc: ["'none'"],
@@ -32,7 +32,14 @@ app.use(
 // ── CORS ──────────────────────────────────────────────────────────────────────
 app.use(
   cors({
-    origin: env.FRONTEND_URL,
+    origin: (origin, callback) => {
+      // Allow local development, the configured frontend URL, and any Vercel deployment
+      if (!origin || origin === env.FRONTEND_URL || origin.endsWith('.vercel.app') || origin === 'http://localhost:3000') {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token'],
