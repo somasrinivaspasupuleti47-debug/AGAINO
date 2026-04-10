@@ -7,15 +7,11 @@ const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.coerce.number().default(4000),
 
-  // Database
-  MONGODB_URI: z.string().min(1, 'MONGODB_URI is required'),
 
   // Supabase
   SUPABASE_URL: z.string().url('SUPABASE_URL must be a valid URL'),
   SUPABASE_ANON_KEY: z.string().min(1, 'SUPABASE_ANON_KEY is required'),
 
-  // Redis
-  REDIS_URL: z.string().min(1, 'REDIS_URL is required'),
 
   // JWT
   ACCESS_TOKEN_SECRET: z.string().min(32, 'ACCESS_TOKEN_SECRET must be at least 32 characters'),
