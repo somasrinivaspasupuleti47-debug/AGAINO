@@ -36,4 +36,12 @@ api.interceptors.response.use(
   }
 );
 
+export const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1').replace('/api/v1', '');
+
+export const getImageUrl = (path: string | undefined) => {
+  if (!path) return '';
+  if (path.startsWith('http')) return path;
+  return `${API_BASE_URL}${path}`;
+};
+
 export default api;

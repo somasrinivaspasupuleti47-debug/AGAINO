@@ -3,8 +3,7 @@ import Link from 'next/link';
 import { motion, useMotionValue, useSpring } from 'framer-motion';
 import { ArrowRight, ShoppingBag, Zap, Tv, Home, ShieldCheck } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { auth } from '@/lib/firebase';
-import { onAuthStateChanged } from 'firebase/auth';
+import { getSession } from '@/lib/auth';
 import { useRouter } from 'next/navigation';
 
 export default function LandingPage() {
@@ -22,10 +21,9 @@ export default function LandingPage() {
   const smoothY = useSpring(cursorY, springConfig);
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => {
-      setIsLogged(!!u);
-      setLoading(false);
-    });
+    const session = getSession();
+    setIsLogged(!!session);
+    setLoading(false);
 
     const handleMouseMove = (e: MouseEvent) => {
       // Offset by half viewport to center it from top-1/2 left-1/2
@@ -36,7 +34,6 @@ export default function LandingPage() {
     window.addEventListener('mousemove', handleMouseMove);
     
     return () => {
-      unsub();
       window.removeEventListener('mousemove', handleMouseMove);
     };
   }, []);

@@ -8,16 +8,15 @@ exports.verifyPayment = verifyPayment;
 const razorpay_1 = __importDefault(require("razorpay"));
 const crypto_1 = __importDefault(require("crypto"));
 const AppError_1 = require("../../utils/AppError");
-// Ensure you have these in your env type definitions or use process.env
-const razorpay = new razorpay_1.default({
-    key_id: process.env.RAZORPAY_KEY_ID || 'rzp_test_dummy',
-    key_secret: process.env.RAZORPAY_KEY_SECRET || 'dummy_secret',
-});
 async function createOrder(req, res) {
     try {
         const { amount, currency = 'INR', receipt = 'receipt_1' } = req.body;
+        const razorpay = new razorpay_1.default({
+            key_id: process.env.RAZORPAY_KEY_ID || 'rzp_test_dummy',
+            key_secret: process.env.RAZORPAY_KEY_SECRET || 'dummy_secret',
+        });
         const options = {
-            amount: amount * 100, // Razorpay works in subunits (e.g. paisa for INR)
+            amount: Math.round(Number(amount) * 100), // Razorpay requires integer subunits
             currency,
             receipt,
         };
@@ -29,7 +28,9 @@ async function createOrder(req, res) {
     }
     catch (error) {
         console.error('Razorpay Order Creation Error:', error);
-        res.status(500).json({ status: 'error', message: 'Failed to create payment order' });
+        // Extract actual razorpay error description if available
+        const razorpayError = error?.error?.description || error?.message || 'Failed to create payment order';
+        res.status(500).json({ status: 'error', message: razorpayError });
     }
 }
 async function verifyPayment(req, res) {

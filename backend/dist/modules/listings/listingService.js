@@ -35,7 +35,6 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.updateListingSchema = exports.createListingSchema = void 0;
 exports.canTransition = canTransition;
-exports.invalidateListingCache = invalidateListingCache;
 exports.createListing = createListing;
 exports.updateListing = updateListing;
 exports.deleteListing = deleteListing;
@@ -44,13 +43,10 @@ exports.publishListing = publishListing;
 exports.markSold = markSold;
 exports.getPublicFeed = getPublicFeed;
 exports.getListingById = getListingById;
-const mongoose_1 = require("mongoose");
 const zod_1 = require("zod");
-const Listing_1 = require("./models/Listing");
+const supabase_1 = require("../../config/supabase");
 const AppError_1 = require("../../utils/AppError");
 const emailQueue_1 = require("../../jobs/emailQueue");
-const redis_1 = require("../../config/redis");
-const cache_1 = require("../../utils/cache");
 // ── Zod schema ────────────────────────────────────────────────────────────────
 exports.createListingSchema = zod_1.z.object({
     title: zod_1.z.string().min(1).max(100),
@@ -96,55 +92,53 @@ function canTransition(from, to, isAdmin) {
     }
     return ALLOWED_TRANSITIONS[from]?.includes(to) ?? false;
 }
-// ── Cache invalidation ────────────────────────────────────────────────────────
-async function invalidateListingCache(listingId) {
-    const redis = (0, redis_1.getRedisClient)();
-    const patterns = ['feed:*', 'search:*', `listing:${listingId}`];
-    for (const pattern of patterns) {
-        if (pattern.includes('*')) {
-            // SCAN + DEL for wildcard patterns
-            let cursor = '0';
-            do {
-                const [nextCursor, keys] = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
-                cursor = nextCursor;
-                if (keys.length > 0) {
-                    await redis.del(...keys);
-                }
-            } while (cursor !== '0');
-        }
-        else {
-            await redis.del(pattern);
-        }
-    }
-}
 // ── Service functions ─────────────────────────────────────────────────────────
 async function createListing(sellerId, data) {
-    const listing = await Listing_1.Listing.create({
+    const { data: listing, error } = await supabase_1.supabase
+        .from('listings')
+        .insert({
         ...data,
-        sellerId: new mongoose_1.Types.ObjectId(sellerId),
+        seller_id: sellerId,
         status: 'draft',
-    });
+    })
+        .select()
+        .single();
+    if (error)
+        throw new AppError_1.AppError(error.message, 500);
     return listing;
 }
 async function updateListing(listingId, sellerId, data, isAdmin) {
-    const listing = await Listing_1.Listing.findById(listingId);
-    if (!listing)
+    const { data: listing, error: fetchError } = await supabase_1.supabase
+        .from('listings')
+        .select('*')
+        .eq('id', listingId)
+        .single();
+    if (fetchError || !listing)
         throw new AppError_1.AppError('Listing not found', 404);
-    if (!isAdmin && listing.sellerId.toString() !== sellerId) {
+    if (!isAdmin && listing.seller_id !== sellerId) {
         throw new AppError_1.AppError('Forbidden', 403);
     }
-    // Prevent direct status changes via update — use dedicated endpoints
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    // Prevent direct status changes via update
     const { status: _status, ...safeUpdateData } = data;
-    Object.assign(listing, safeUpdateData);
-    await listing.save();
-    return listing;
+    const { data: updated, error: updateError } = await supabase_1.supabase
+        .from('listings')
+        .update(safeUpdateData)
+        .eq('id', listingId)
+        .select()
+        .single();
+    if (updateError)
+        throw new AppError_1.AppError(updateError.message, 500);
+    return updated;
 }
 async function deleteListing(listingId, sellerId) {
-    const listing = await Listing_1.Listing.findById(listingId);
-    if (!listing)
+    const { data: listing, error: fetchError } = await supabase_1.supabase
+        .from('listings')
+        .select('*')
+        .eq('id', listingId)
+        .single();
+    if (fetchError || !listing)
         throw new AppError_1.AppError('Listing not found', 404);
-    if (listing.sellerId.toString() !== sellerId) {
+    if (listing.seller_id !== sellerId) {
         throw new AppError_1.AppError('Forbidden', 403);
     }
     // Delete image files from disk
@@ -158,92 +152,106 @@ async function deleteListing(listingId, sellerId) {
             await fs.unlink(thumbnailPath).catch(() => { });
         }
     }
-    await Listing_1.Listing.findByIdAndDelete(listingId);
-    await invalidateListingCache(listingId);
+    await supabase_1.supabase.from('listings').delete().eq('id', listingId);
 }
 async function getMyListings(sellerId) {
-    return Listing_1.Listing.find({ sellerId: new mongoose_1.Types.ObjectId(sellerId) }).sort({ createdAt: -1 });
+    const { data, error } = await supabase_1.supabase
+        .from('listings')
+        .select('*')
+        .eq('seller_id', sellerId)
+        .order('created_at', { ascending: false });
+    if (error)
+        throw new AppError_1.AppError(error.message, 500);
+    return data;
 }
 async function publishListing(listingId, sellerId) {
-    const listing = await Listing_1.Listing.findById(listingId);
-    if (!listing)
+    const { data: listing, error: fetchError } = await supabase_1.supabase
+        .from('listings')
+        .select('*')
+        .eq('id', listingId)
+        .single();
+    if (fetchError || !listing)
         throw new AppError_1.AppError('Listing not found', 404);
-    if (listing.sellerId.toString() !== sellerId) {
+    if (listing.seller_id !== sellerId) {
         throw new AppError_1.AppError('Forbidden', 403);
     }
     if (!canTransition(listing.status, 'published', false)) {
         throw new AppError_1.AppError(`Cannot transition from ${listing.status} to published`, 400);
     }
-    listing.status = 'published';
-    await listing.save();
+    const { data: updated, error: updateError } = await supabase_1.supabase
+        .from('listings')
+        .update({ status: 'published' })
+        .eq('id', listingId)
+        .select()
+        .single();
+    if (updateError)
+        throw new AppError_1.AppError(updateError.message, 500);
     await (0, emailQueue_1.enqueueAdminEmail)('admin.listing.published', {
-        listingId: listing._id.toString(),
-        title: listing.title,
-        sellerId: listing.sellerId.toString(),
+        listingId: updated.id,
+        title: updated.title,
+        sellerId: updated.seller_id,
     });
-    await invalidateListingCache(listingId);
-    return listing;
+    return updated;
 }
 async function markSold(listingId, sellerId) {
-    const listing = await Listing_1.Listing.findById(listingId);
-    if (!listing)
+    const { data: listing, error: fetchError } = await supabase_1.supabase
+        .from('listings')
+        .select('*')
+        .eq('id', listingId)
+        .single();
+    if (fetchError || !listing)
         throw new AppError_1.AppError('Listing not found', 404);
-    if (listing.sellerId.toString() !== sellerId) {
+    if (listing.seller_id !== sellerId) {
         throw new AppError_1.AppError('Forbidden', 403);
     }
     if (!canTransition(listing.status, 'sold', false)) {
         throw new AppError_1.AppError(`Cannot transition from ${listing.status} to sold`, 400);
     }
-    listing.status = 'sold';
-    await listing.save();
+    const { data: updated, error: updateError } = await supabase_1.supabase
+        .from('listings')
+        .update({ status: 'sold' })
+        .eq('id', listingId)
+        .select()
+        .single();
+    if (updateError)
+        throw new AppError_1.AppError(updateError.message, 500);
     await (0, emailQueue_1.enqueueAdminEmail)('admin.listing.sold', {
-        listingId: listing._id.toString(),
-        title: listing.title,
-        sellerId: listing.sellerId.toString(),
+        listingId: updated.id,
+        title: updated.title,
+        sellerId: updated.seller_id,
     });
-    await invalidateListingCache(listingId);
-    return listing;
+    return updated;
 }
 async function getPublicFeed(page, limit) {
-    const cacheKey = `feed:home:${page}`;
-    return (0, cache_1.getOrSet)(cacheKey, 300, async () => {
-        const skip = (page - 1) * limit;
-        const [featured, regular, total] = await Promise.all([
-            Listing_1.Listing.find({ status: 'published', isFeatured: true })
-                .sort({ createdAt: -1 })
-                .skip(skip)
-                .limit(limit),
-            Listing_1.Listing.find({ status: 'published', isFeatured: false })
-                .sort({ createdAt: -1 })
-                .skip(skip)
-                .limit(limit),
-            Listing_1.Listing.countDocuments({ status: 'published' }),
-        ]);
-        // Merge featured first, then regular, deduplicate by id
-        const seen = new Set();
-        const merged = [];
-        for (const l of [...featured, ...regular]) {
-            const id = l._id.toString();
-            if (!seen.has(id)) {
-                seen.add(id);
-                merged.push(l);
-            }
-        }
-        return {
-            listings: merged.slice(0, limit),
-            total,
-            page,
-            limit,
-            pages: Math.ceil(total / limit),
-        };
-    });
+    const offset = (page - 1) * limit;
+    // Supabase doesn't easily support the dual-sort merge in one query without complex logic
+    // We'll fetch published listings ordered by featured DESC then created_at DESC
+    const { data: listings, error, count, } = await supabase_1.supabase
+        .from('listings')
+        .select('*', { count: 'exact' })
+        .eq('status', 'published')
+        .order('is_featured', { ascending: false })
+        .order('created_at', { ascending: false })
+        .range(offset, offset + limit - 1);
+    if (error)
+        throw new AppError_1.AppError(error.message, 500);
+    return {
+        listings,
+        total: count || 0,
+        page,
+        limit,
+        pages: Math.ceil((count || 0) / limit),
+    };
 }
 async function getListingById(id) {
-    return (0, cache_1.getOrSet)(`listing:${id}`, 300, async () => {
-        const listing = await Listing_1.Listing.findOne({ _id: id, status: 'published' });
-        if (!listing)
-            throw new AppError_1.AppError('Listing not found', 404);
-        return listing;
-    });
+    const { data: listing, error } = await supabase_1.supabase
+        .from('listings')
+        .select('*')
+        .eq('id', id)
+        .eq('status', 'published')
+        .single();
+    if (error || !listing)
+        throw new AppError_1.AppError('Listing not found', 404);
+    return listing;
 }
 //# sourceMappingURL=listingService.js.map

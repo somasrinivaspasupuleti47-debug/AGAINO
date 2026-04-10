@@ -13,7 +13,6 @@ import { requireAuth } from '../../middleware/auth';
 import { authRateLimiter } from '../../middleware/rateLimiter';
 import { generateTokens } from './authService';
 import { env } from '../../config/env';
-import { IUser } from './models/User';
 
 export const authRouter = Router();
 
@@ -39,9 +38,8 @@ authRouter.get(
   }),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const user = req.user as unknown as IUser;
-      const userId = (user._id as unknown as string).toString();
-      const { accessToken, refreshToken } = await generateTokens(userId, user.email, user.role);
+      const user = req.user as any;
+      const { accessToken, refreshToken } = await generateTokens(user.id, user.email, user.role);
       res.redirect(
         `${env.FRONTEND_URL}/oauth/callback?accessToken=${accessToken}&refreshToken=${refreshToken}`,
       );

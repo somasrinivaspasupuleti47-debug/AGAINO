@@ -47,7 +47,7 @@ export async function handleUpdateListing(
 
     const sellerId = req.user!.userId;
     const isAdmin = req.user!.role === 'admin';
-    const listing = await updateListing(req.params.id, sellerId, parsed.data, isAdmin);
+    const listing = await updateListing(req.params.id as string, sellerId, parsed.data, isAdmin);
     res.json({ status: 'success', data: listing });
   } catch (err) {
     next(err);
@@ -61,7 +61,7 @@ export async function handleDeleteListing(
 ): Promise<void> {
   try {
     const sellerId = req.user!.userId;
-    await deleteListing(req.params.id, sellerId);
+    await deleteListing(req.params.id as string, sellerId);
     res.json({ status: 'success', message: 'Listing permanently deleted' });
   } catch (err) {
     next(err);
@@ -89,7 +89,7 @@ export async function handlePublishListing(
 ): Promise<void> {
   try {
     const sellerId = req.user!.userId;
-    const listing = await publishListing(req.params.id, sellerId);
+    const listing = await publishListing(req.params.id as string, sellerId);
     res.json({ status: 'success', data: listing });
   } catch (err) {
     next(err);
@@ -103,7 +103,7 @@ export async function handleMarkSold(
 ): Promise<void> {
   try {
     const sellerId = req.user!.userId;
-    const listing = await markSold(req.params.id, sellerId);
+    const listing = await markSold(req.params.id as string, sellerId);
     res.json({ status: 'success', data: listing });
   } catch (err) {
     next(err);
@@ -131,7 +131,7 @@ export async function handleGetListingById(
   next: NextFunction,
 ): Promise<void> {
   try {
-    const listing = await getListingById(req.params.id);
+    const listing = await getListingById(req.params.id as string);
     res.json({ status: 'success', data: listing });
   } catch (err) {
     next(err);
@@ -156,15 +156,20 @@ export async function handleUploadImages(
       return;
     }
 
-    const { Listing } = await import('./models/Listing');
-    const listing = await Listing.findById(req.params.id);
-    if (!listing) {
+    const { supabase } = await import('../../config/supabase');
+    const { data: listing, error: fetchError } = await supabase
+      .from('listings')
+      .select('seller_id')
+      .eq('id', req.params.id)
+      .single();
+
+    if (fetchError || !listing) {
       res.status(404).json({ status: 'fail', message: 'Listing not found' });
       return;
     }
 
     // Only the owner can upload images
-    if (listing.sellerId.toString() !== req.user!.userId) {
+    if (listing.seller_id !== req.user!.userId) {
       res.status(403).json({ status: 'fail', message: 'Forbidden' });
       return;
     }
@@ -172,7 +177,14 @@ export async function handleUploadImages(
     const { processAndSaveImages } = await import('../../services/imageService');
     const processed = await processAndSaveImages(files);
 
-    await Listing.findByIdAndUpdate(req.params.id, { images: processed });
+    const { error: updateError } = await supabase
+      .from('listings')
+      .update({ images: processed })
+      .eq('id', req.params.id);
+
+    if (updateError) {
+      throw new AppError(updateError.message, 500);
+    }
 
     res.json({ status: 'success', data: processed });
   } catch (err) {

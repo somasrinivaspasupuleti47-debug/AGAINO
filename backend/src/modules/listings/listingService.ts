@@ -1,10 +1,7 @@
-import { Types } from 'mongoose';
 import { z } from 'zod';
-import { Listing } from './models/Listing';
+import { supabase } from '../../config/supabase';
 import { AppError } from '../../utils/AppError';
 import { enqueueAdminEmail } from '../../jobs/emailQueue';
-import { getRedisClient } from '../../config/redis';
-import { getOrSet } from '../../utils/cache';
 
 // ── Zod schema ────────────────────────────────────────────────────────────────
 
@@ -66,38 +63,20 @@ export function canTransition(from: ListingStatus, to: ListingStatus, isAdmin: b
   return ALLOWED_TRANSITIONS[from]?.includes(to) ?? false;
 }
 
-// ── Cache invalidation ────────────────────────────────────────────────────────
-
-export async function invalidateListingCache(listingId: string): Promise<void> {
-  const redis = getRedisClient();
-
-  const patterns = ['feed:*', 'search:*', `listing:${listingId}`];
-
-  for (const pattern of patterns) {
-    if (pattern.includes('*')) {
-      // SCAN + DEL for wildcard patterns
-      let cursor = '0';
-      do {
-        const [nextCursor, keys] = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
-        cursor = nextCursor;
-        if (keys.length > 0) {
-          await redis.del(...keys);
-        }
-      } while (cursor !== '0');
-    } else {
-      await redis.del(pattern);
-    }
-  }
-}
-
 // ── Service functions ─────────────────────────────────────────────────────────
 
 export async function createListing(sellerId: string, data: CreateListingInput) {
-  const listing = await Listing.create({
-    ...data,
-    sellerId: new Types.ObjectId(sellerId),
-    status: 'draft',
-  });
+  const { data: listing, error } = await supabase
+    .from('listings')
+    .insert({
+      ...data,
+      seller_id: sellerId,
+      status: 'draft',
+    })
+    .select()
+    .single();
+
+  if (error) throw new AppError(error.message, 500);
   return listing;
 }
 
@@ -107,27 +86,42 @@ export async function updateListing(
   data: UpdateListingInput,
   isAdmin: boolean,
 ) {
-  const listing = await Listing.findById(listingId);
-  if (!listing) throw new AppError('Listing not found', 404);
+  const { data: listing, error: fetchError } = await supabase
+    .from('listings')
+    .select('*')
+    .eq('id', listingId)
+    .single();
 
-  if (!isAdmin && listing.sellerId.toString() !== sellerId) {
+  if (fetchError || !listing) throw new AppError('Listing not found', 404);
+
+  if (!isAdmin && listing.seller_id !== sellerId) {
     throw new AppError('Forbidden', 403);
   }
 
-  // Prevent direct status changes via update — use dedicated endpoints
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  // Prevent direct status changes via update
   const { status: _status, ...safeUpdateData } = data as UpdateListingInput & { status?: string };
 
-  Object.assign(listing, safeUpdateData);
-  await listing.save();
-  return listing;
+  const { data: updated, error: updateError } = await supabase
+    .from('listings')
+    .update(safeUpdateData)
+    .eq('id', listingId)
+    .select()
+    .single();
+
+  if (updateError) throw new AppError(updateError.message, 500);
+  return updated;
 }
 
 export async function deleteListing(listingId: string, sellerId: string) {
-  const listing = await Listing.findById(listingId);
-  if (!listing) throw new AppError('Listing not found', 404);
+  const { data: listing, error: fetchError } = await supabase
+    .from('listings')
+    .select('*')
+    .eq('id', listingId)
+    .single();
 
-  if (listing.sellerId.toString() !== sellerId) {
+  if (fetchError || !listing) throw new AppError('Listing not found', 404);
+
+  if (listing.seller_id !== sellerId) {
     throw new AppError('Forbidden', 403);
   }
 
@@ -151,19 +145,30 @@ export async function deleteListing(listingId: string, sellerId: string) {
     }
   }
 
-  await Listing.findByIdAndDelete(listingId);
-  await invalidateListingCache(listingId);
+  await supabase.from('listings').delete().eq('id', listingId);
 }
 
 export async function getMyListings(sellerId: string) {
-  return Listing.find({ sellerId: new Types.ObjectId(sellerId) }).sort({ createdAt: -1 });
+  const { data, error } = await supabase
+    .from('listings')
+    .select('*')
+    .eq('seller_id', sellerId)
+    .order('created_at', { ascending: false });
+
+  if (error) throw new AppError(error.message, 500);
+  return data;
 }
 
 export async function publishListing(listingId: string, sellerId: string) {
-  const listing = await Listing.findById(listingId);
-  if (!listing) throw new AppError('Listing not found', 404);
+  const { data: listing, error: fetchError } = await supabase
+    .from('listings')
+    .select('*')
+    .eq('id', listingId)
+    .single();
 
-  if (listing.sellerId.toString() !== sellerId) {
+  if (fetchError || !listing) throw new AppError('Listing not found', 404);
+
+  if (listing.seller_id !== sellerId) {
     throw new AppError('Forbidden', 403);
   }
 
@@ -171,23 +176,34 @@ export async function publishListing(listingId: string, sellerId: string) {
     throw new AppError(`Cannot transition from ${listing.status} to published`, 400);
   }
 
-  listing.status = 'published';
-  await listing.save();
+  const { data: updated, error: updateError } = await supabase
+    .from('listings')
+    .update({ status: 'published' })
+    .eq('id', listingId)
+    .select()
+    .single();
+
+  if (updateError) throw new AppError(updateError.message, 500);
 
   await enqueueAdminEmail('admin.listing.published', {
-    listingId: listing._id.toString(),
-    title: listing.title,
-    sellerId: listing.sellerId.toString(),
+    listingId: updated.id,
+    title: updated.title,
+    sellerId: updated.seller_id,
   });
-  await invalidateListingCache(listingId);
-  return listing;
+
+  return updated;
 }
 
 export async function markSold(listingId: string, sellerId: string) {
-  const listing = await Listing.findById(listingId);
-  if (!listing) throw new AppError('Listing not found', 404);
+  const { data: listing, error: fetchError } = await supabase
+    .from('listings')
+    .select('*')
+    .eq('id', listingId)
+    .single();
 
-  if (listing.sellerId.toString() !== sellerId) {
+  if (fetchError || !listing) throw new AppError('Listing not found', 404);
+
+  if (listing.seller_id !== sellerId) {
     throw new AppError('Forbidden', 403);
   }
 
@@ -195,61 +211,60 @@ export async function markSold(listingId: string, sellerId: string) {
     throw new AppError(`Cannot transition from ${listing.status} to sold`, 400);
   }
 
-  listing.status = 'sold';
-  await listing.save();
+  const { data: updated, error: updateError } = await supabase
+    .from('listings')
+    .update({ status: 'sold' })
+    .eq('id', listingId)
+    .select()
+    .single();
+
+  if (updateError) throw new AppError(updateError.message, 500);
 
   await enqueueAdminEmail('admin.listing.sold', {
-    listingId: listing._id.toString(),
-    title: listing.title,
-    sellerId: listing.sellerId.toString(),
+    listingId: updated.id,
+    title: updated.title,
+    sellerId: updated.seller_id,
   });
 
-  await invalidateListingCache(listingId);
-  return listing;
+  return updated;
 }
 
 export async function getPublicFeed(page: number, limit: number) {
-  const cacheKey = `feed:home:${page}`;
-  return getOrSet(cacheKey, 300, async () => {
-    const skip = (page - 1) * limit;
+  const offset = (page - 1) * limit;
 
-    const [featured, regular, total] = await Promise.all([
-      Listing.find({ status: 'published', isFeatured: true })
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit),
-      Listing.find({ status: 'published', isFeatured: false })
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit),
-      Listing.countDocuments({ status: 'published' }),
-    ]);
+  // Supabase doesn't easily support the dual-sort merge in one query without complex logic
+  // We'll fetch published listings ordered by featured DESC then created_at DESC
+  const {
+    data: listings,
+    error,
+    count,
+  } = await supabase
+    .from('listings')
+    .select('*', { count: 'exact' })
+    .eq('status', 'published')
+    .order('is_featured', { ascending: false })
+    .order('created_at', { ascending: false })
+    .range(offset, offset + limit - 1);
 
-    // Merge featured first, then regular, deduplicate by id
-    const seen = new Set<string>();
-    const merged: typeof featured = [];
-    for (const l of [...featured, ...regular]) {
-      const id = l._id.toString();
-      if (!seen.has(id)) {
-        seen.add(id);
-        merged.push(l);
-      }
-    }
+  if (error) throw new AppError(error.message, 500);
 
-    return {
-      listings: merged.slice(0, limit),
-      total,
-      page,
-      limit,
-      pages: Math.ceil(total / limit),
-    };
-  });
+  return {
+    listings,
+    total: count || 0,
+    page,
+    limit,
+    pages: Math.ceil((count || 0) / limit),
+  };
 }
 
 export async function getListingById(id: string) {
-  return getOrSet(`listing:${id}`, 300, async () => {
-    const listing = await Listing.findOne({ _id: id, status: 'published' });
-    if (!listing) throw new AppError('Listing not found', 404);
-    return listing;
-  });
+  const { data: listing, error } = await supabase
+    .from('listings')
+    .select('*')
+    .eq('id', id)
+    .eq('status', 'published')
+    .single();
+
+  if (error || !listing) throw new AppError('Listing not found', 404);
+  return listing;
 }

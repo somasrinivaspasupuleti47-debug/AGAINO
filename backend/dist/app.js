@@ -21,7 +21,7 @@ app.use((0, helmet_1.default)({
             scriptSrc: ["'self'"],
             styleSrc: ["'self'", "'unsafe-inline'"],
             imgSrc: ["'self'", 'data:', 'https:', 'http:'],
-            connectSrc: ["'self'", 'http://localhost:3000'],
+            connectSrc: ["'self'", env_1.env.FRONTEND_URL],
             fontSrc: ["'self'"],
             objectSrc: ["'none'"],
             frameSrc: ["'none'"],

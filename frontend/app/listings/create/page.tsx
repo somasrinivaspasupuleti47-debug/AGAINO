@@ -1,7 +1,6 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
-import { auth } from '@/lib/firebase';
-import { onAuthStateChanged } from 'firebase/auth';
+import { getSession } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import { ImagePlus, X } from 'lucide-react';
@@ -22,17 +21,15 @@ export default function CreateListingPage() {
   const [previews, setPreviews] = useState<string[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [userAuth, setUserAuth] = useState<any>(null);
+  const [userSession, setUserSession] = useState<any>(null);
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => {
-      if (!u) {
-        router.push('/login');
-      } else {
-        setUserAuth(u);
-      }
-    });
-    return () => unsub();
+    const session = getSession();
+    if (!session) {
+      router.push('/login');
+    } else {
+      setUserSession(session);
+    }
   }, []);
 
   const set = (field: string, value: any) => setForm(f => ({ ...f, [field]: value }));
@@ -56,24 +53,27 @@ export default function CreateListingPage() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (images.length === 0) { setError('Please add at least 1 photo'); return; }
-    if (!userAuth) { setError('You must be logged in.'); return; }
+    if (!userSession) { setError('You must be logged in.'); return; }
     
     setLoading(true); setError('');
     try {
-      // Step 1: create listing
-      const isAdminCreate = userAuth.email === ADMIN_EMAIL;
+      const isAdminCreate = userSession.email === ADMIN_EMAIL;
       
+      // Destructure mobile out to avoid sending it to DB
+      const { mobile, ...listingData } = form;
+
+      // Step 1: create listing
       const { data, error: insertError } = await supabase.from('listings').insert({
-        ...form,
+        ...listingData,
         price: Number(form.price),
-        seller_id: userAuth.uid,
-        seller_phone: form.mobile,
+        seller_id: userSession.id,
+        seller_phone: mobile,
         status: isAdminCreate ? 'approved' : 'pending',
         subcategory: isAdminCreate ? 'OFFICIAL_MARKETPLACE' : 'General'
       }).select().single();
       
       if (insertError) throw insertError;
-      const listingId = data._id || data.id; // handle case depending on _id vs id
+      const listingId = data.id;
 
       // Step 2: upload images to backend directly
       const uploadedImages = [];
@@ -81,7 +81,7 @@ export default function CreateListingPage() {
         const formData = new FormData();
         images.forEach((img) => formData.append('images', img));
         
-        const uploadRes = await fetch('http://localhost:4000/api/v1/listings/upload', {
+        const uploadRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1'}/listings/upload`, {
           method: 'POST',
           body: formData,
         });
@@ -99,7 +99,7 @@ export default function CreateListingPage() {
 
       // Step 3: updating listing with image paths
       if (uploadedImages.length > 0) {
-        await supabase.from('listings').update({ images: uploadedImages }).eq('_id', listingId);
+        await supabase.from('listings').update({ images: uploadedImages }).eq('id', listingId);
       }
 
       if (isAdminCreate) {

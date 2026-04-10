@@ -1,6 +1,6 @@
 {
   "dependencies": {
-    "firebase": "^12.11.0",
+    "@vercel/analytics": "^2.0.1",
     "mongodb": "^7.1.1"
   }
 }

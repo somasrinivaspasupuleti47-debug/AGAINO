@@ -12,6 +12,9 @@ const envSchema = zod_1.z.object({
     PORT: zod_1.z.coerce.number().default(4000),
     // Database
     MONGODB_URI: zod_1.z.string().min(1, 'MONGODB_URI is required'),
+    // Supabase
+    SUPABASE_URL: zod_1.z.string().url('SUPABASE_URL must be a valid URL'),
+    SUPABASE_ANON_KEY: zod_1.z.string().min(1, 'SUPABASE_ANON_KEY is required'),
     // Redis
     REDIS_URL: zod_1.z.string().min(1, 'REDIS_URL is required'),
     // JWT

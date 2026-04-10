@@ -3,9 +3,10 @@ import Link from 'next/link';
 import { MapPin } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useState, useEffect } from 'react';
+import { getImageUrl } from '@/lib/api';
 
 interface Listing {
-  _id: string;
+  id: string;
   title: string;
   price: number;
   condition: string;
@@ -37,14 +38,14 @@ export default function ListingCard({ listing }: { listing: Listing }) {
       onMouseEnter={() => setIsHovering(true)}
       onMouseLeave={() => setIsHovering(false)}
     >
-      <Link href={`/listings/${listing._id}`} className="block glass rounded-2xl shadow-sm hover:shadow-xl transition-shadow duration-300 overflow-hidden group flex flex-col h-full border border-border/50 bg-card">
+      <Link href={`/listings/${listing.id}`} className="block glass rounded-2xl shadow-sm hover:shadow-xl transition-shadow duration-300 overflow-hidden group flex flex-col h-full border border-border/50 bg-card">
         {/* Image Slider */}
         <div className="relative w-full overflow-hidden bg-secondary/20" style={{ paddingBottom: '75%' }}>
           {listing.images && listing.images.length > 0 ? (
             <AnimatePresence mode="popLayout">
               <motion.img
                 key={imgIdx}
-                src={listing.images[imgIdx]?.original?.startsWith('http') ? listing.images[imgIdx].original : `http://localhost:4000${listing.images[imgIdx]?.original}`}
+                src={getImageUrl(listing.images[imgIdx]?.original)}
                 alt={listing.title}
                 initial={{ opacity: 0, scale: 1.05 }}
                 animate={{ opacity: 1, scale: 1 }}

@@ -42,6 +42,7 @@ exports.handleMarkSold = handleMarkSold;
 exports.handleGetPublicFeed = handleGetPublicFeed;
 exports.handleGetListingById = handleGetListingById;
 exports.handleUploadImages = handleUploadImages;
+exports.handleDirectUploadImages = handleDirectUploadImages;
 exports.listingErrorHandler = listingErrorHandler;
 const listingService_1 = require("./listingService");
 const AppError_1 = require("../../utils/AppError");
@@ -148,20 +149,49 @@ async function handleUploadImages(req, res, next) {
             res.status(400).json({ status: 'fail', message: 'Maximum 5 images allowed' });
             return;
         }
-        const { Listing } = await Promise.resolve().then(() => __importStar(require('./models/Listing')));
-        const listing = await Listing.findById(req.params.id);
-        if (!listing) {
+        const { supabase } = await Promise.resolve().then(() => __importStar(require('../../config/supabase')));
+        const { data: listing, error: fetchError } = await supabase
+            .from('listings')
+            .select('seller_id')
+            .eq('id', req.params.id)
+            .single();
+        if (fetchError || !listing) {
             res.status(404).json({ status: 'fail', message: 'Listing not found' });
             return;
         }
         // Only the owner can upload images
-        if (listing.sellerId.toString() !== req.user.userId) {
+        if (listing.seller_id !== req.user.userId) {
             res.status(403).json({ status: 'fail', message: 'Forbidden' });
             return;
         }
         const { processAndSaveImages } = await Promise.resolve().then(() => __importStar(require('../../services/imageService')));
         const processed = await processAndSaveImages(files);
-        await Listing.findByIdAndUpdate(req.params.id, { images: processed });
+        const { error: updateError } = await supabase
+            .from('listings')
+            .update({ images: processed })
+            .eq('id', req.params.id);
+        if (updateError) {
+            throw new AppError_1.AppError(updateError.message, 500);
+        }
+        res.json({ status: 'success', data: processed });
+    }
+    catch (err) {
+        next(err);
+    }
+}
+async function handleDirectUploadImages(req, res, next) {
+    try {
+        const files = req.files;
+        if (!files || files.length === 0) {
+            res.status(400).json({ status: 'fail', message: 'At least 1 image is required' });
+            return;
+        }
+        if (files.length > 5) {
+            res.status(400).json({ status: 'fail', message: 'Maximum 5 images allowed' });
+            return;
+        }
+        const { processAndSaveImages } = await Promise.resolve().then(() => __importStar(require('../../services/imageService')));
+        const processed = await processAndSaveImages(files);
         res.json({ status: 'success', data: processed });
     }
     catch (err) {

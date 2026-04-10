@@ -2,11 +2,10 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Script from 'next/script';
-import api from '@/lib/api';
+import api, { getImageUrl } from '@/lib/api';
 import { MapPin, Tag, ShieldCheck, ShoppingCart, Phone, Lock } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { auth } from '@/lib/firebase';
-import { onAuthStateChanged } from 'firebase/auth';
+import { getSession } from '@/lib/auth';
 
 const ADMIN_EMAIL = 'somasrinivaspasupuleti47@gmail.com';
 
@@ -20,20 +19,17 @@ export default function ListingDetailPage() {
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
 
   useEffect(() => {
-    const unsubAuth = onAuthStateChanged(auth, (user) => {
-      setCurrentUser(user);
-    });
+    const session = getSession();
+    setCurrentUser(session);
 
     import('@/lib/supabase').then(({ supabase }) => {
-      supabase.from('listings').select('*').eq('_id', id).single().then(({ data, error }) => {
+      supabase.from('listings').select('*').eq('id', id).single().then(({ data, error }) => {
         if (!error && data) {
           setListing(data);
         }
         setLoading(false);
       });
     });
-
-    return () => unsubAuth();
   }, [id]);
 
   useEffect(() => {
@@ -43,7 +39,7 @@ export default function ListingDetailPage() {
         setIsAuthorized(true);
       } else {
         // Private listing - check owner or admin
-        const isOwner = currentUser && currentUser.uid === listing.seller_id;
+        const isOwner = currentUser && currentUser.id === listing.seller_id;
         const isAdmin = currentUser && currentUser.email === ADMIN_EMAIL;
         setIsAuthorized(!!(isOwner || isAdmin));
       }
@@ -58,7 +54,7 @@ export default function ListingDetailPage() {
       const { data } = await api.post('/payments/create-order', {
         amount: listing.price,
         currency: 'INR',
-        receipt: `rcpt_${listing._id}`.substring(0, 40)
+        receipt: `rcpt_${listing.id}`.substring(0, 40)
       });
 
       const order = data.data;
@@ -81,7 +77,7 @@ export default function ListingDetailPage() {
 
             // Remove/hide it from the marketplace by setting status to 'sold'
             const { supabase } = await import('@/lib/supabase');
-            await supabase.from('listings').update({ status: 'sold' }).eq('_id', listing._id);
+            await supabase.from('listings').update({ status: 'sold' }).eq('id', listing.id);
 
             alert('Payment Successful! The item has been secured and removed from public listings.');
             window.location.href = '/marketplace';
@@ -178,7 +174,7 @@ export default function ListingDetailPage() {
                     onClick={() => setImgIdx(i)} 
                     className={`flex-shrink-0 w-20 h-20 rounded-xl overflow-hidden border-2 transition-all duration-200 ${i === imgIdx ? 'border-primary ring-2 ring-primary/20 scale-105' : 'border-transparent opacity-70 hover:opacity-100'}`}
                   >
-                    <img src={img.thumbnail.startsWith('http') ? img.thumbnail : `http://localhost:4000${img.thumbnail}`} alt="" className="w-full h-full object-cover" />
+                    <img src={getImageUrl(img.thumbnail)} alt="" className="w-full h-full object-cover" />
                   </button>
                 ))}
               </div>

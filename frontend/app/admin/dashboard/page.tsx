@@ -3,8 +3,8 @@ import { useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
-import { auth } from '@/lib/firebase';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { getSession, logout as authLogout } from '@/lib/auth';
+import { getImageUrl } from '@/lib/api';
 import { supabase } from '@/lib/supabase';
 import {
   ShieldCheck, Package, CheckCircle, ShoppingBag, Trash2,
@@ -56,17 +56,15 @@ export default function AdminDashboard() {
 
   /* ── Auth gate ── */
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (u) => {
-      if (!u || u.email !== ADMIN_EMAIL) {
-        setAuthChecked(true);
-        setIsAdmin(false);
-        return;
-      }
-      setIsAdmin(true);
+    const session = getSession();
+    if (!session || session.email !== ADMIN_EMAIL) {
       setAuthChecked(true);
-      await fetchAll();
-    });
-    return () => unsub();
+      setIsAdmin(false);
+      return;
+    }
+    setIsAdmin(true);
+    setAuthChecked(true);
+    fetchAll();
   }, []);
 
   const fetchAll = async () => {
@@ -80,18 +78,17 @@ export default function AdminDashboard() {
   };
 
   const handleDelete = async (listing: Listing) => {
-    const lid = listing._id || listing.id;
+    const lid = listing.id;
     if (!confirm(`Delete "${listing.title}"? This cannot be undone.`)) return;
     setDeleting(lid);
-    await supabase.from('listings').delete().eq('_id', lid);
-    setListings(prev => prev.filter(l => (l._id || l.id) !== lid));
-    if (selectedListing && (selectedListing._id || selectedListing.id) === lid) setSelectedListing(null);
+    await supabase.from('listings').delete().eq('id', lid);
+    setListings(prev => prev.filter(l => l.id !== lid));
+    if (selectedListing && selectedListing.id === lid) setSelectedListing(null);
     setDeleting(null);
   };
 
-  const handleLogout = async () => {
-    await signOut(auth);
-    router.push('/');
+  const handleLogout = () => {
+    authLogout();
   };
 
   /* ── Derived data ── */
@@ -106,17 +103,17 @@ export default function AdminDashboard() {
   }, [listings, search, statusFilter, categoryFilter]);
 
   const handleApprove = async (listing: Listing) => {
-    const lid = listing._id || listing.id;
+    const lid = listing.id;
     setLoading(true);
     const { error } = await supabase
       .from('listings')
       .update({ status: 'approved' })
-      .eq('_id', lid);
+      .eq('id', lid);
 
     if (error) {
       alert(error.message);
     } else {
-      setListings(prev => prev.map(l => (l._id || l.id) === lid ? { ...l, status: 'approved' } : l));
+      setListings(prev => prev.map(l => l.id === lid ? { ...l, status: 'approved' } : l));
     }
     setLoading(false);
   };
@@ -124,17 +121,17 @@ export default function AdminDashboard() {
 
 
   const handleMarkSold = async (listing: Listing) => {
-    const lid = listing._id || listing.id;
+    const lid = listing.id;
     setLoading(true);
     const { error } = await supabase
       .from('listings')
       .update({ status: 'sold' })
-      .eq('_id', lid);
+      .eq('id', lid);
 
     if (error) {
       alert(error.message);
     } else {
-      setListings(prev => prev.map(l => (l._id || l.id) === lid ? { ...l, status: 'sold' } : l));
+      setListings(prev => prev.map(l => l.id === lid ? { ...l, status: 'sold' } : l));
     }
     setLoading(false);
   };
@@ -151,7 +148,7 @@ export default function AdminDashboard() {
   const imgSrc = (l: Listing) => {
     const img = l.images?.[0]?.original;
     if (!img) return null;
-    return img.startsWith('http') ? img : `http://localhost:4000${img}`;
+    return getImageUrl(img);
   };
 
   /* ── Access denied ── */
@@ -315,7 +312,7 @@ export default function AdminDashboard() {
 
               <AnimatePresence>
                 {filtered.map((listing, i) => {
-                  const lid = listing._id || listing.id;
+                  const lid = listing.id;
                   const src = imgSrc(listing);
                   return (
                     <motion.div

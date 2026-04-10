@@ -10,6 +10,10 @@ const envSchema = z.object({
   // Database
   MONGODB_URI: z.string().min(1, 'MONGODB_URI is required'),
 
+  // Supabase
+  SUPABASE_URL: z.string().url('SUPABASE_URL must be a valid URL'),
+  SUPABASE_ANON_KEY: z.string().min(1, 'SUPABASE_ANON_KEY is required'),
+
   // Redis
   REDIS_URL: z.string().min(1, 'REDIS_URL is required'),
 

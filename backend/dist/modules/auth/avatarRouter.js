@@ -11,7 +11,7 @@ const path_1 = __importDefault(require("path"));
 const promises_1 = __importDefault(require("fs/promises"));
 const uuid_1 = require("uuid");
 const auth_1 = require("../../middleware/auth");
-const User_1 = require("./models/User");
+const supabase_1 = require("../../config/supabase");
 const storage = multer_1.default.memoryStorage();
 const upload = (0, multer_1.default)({ storage, limits: { fileSize: 5 * 1024 * 1024, files: 1 } });
 exports.avatarRouter = (0, express_1.Router)();
@@ -28,12 +28,19 @@ exports.avatarRouter.post('/me/avatar', auth_1.requireAuth, upload.single('avata
         await (0, sharp_1.default)(req.file.buffer).resize(200, 200, { fit: 'cover' }).webp().toFile(filepath);
         const avatarUrl = `/uploads/avatars/${filename}`;
         // Delete old avatar file if exists
-        const user = await User_1.User.findById(req.user.userId);
+        const { data: user } = await supabase_1.supabase
+            .from('users')
+            .select('avatar')
+            .eq('id', req.user.userId)
+            .single();
         if (user?.avatar && user.avatar.startsWith('/uploads/')) {
             const oldPath = path_1.default.resolve(__dirname, '../../../../uploads', user.avatar.replace('/uploads/', ''));
             await promises_1.default.unlink(oldPath).catch(() => { });
         }
-        await User_1.User.findByIdAndUpdate(req.user.userId, { avatar: avatarUrl });
+        await supabase_1.supabase
+            .from('users')
+            .update({ avatar: avatarUrl })
+            .eq('id', req.user.userId);
         res.json({ status: 'success', avatar: avatarUrl });
     }
     catch (err) {

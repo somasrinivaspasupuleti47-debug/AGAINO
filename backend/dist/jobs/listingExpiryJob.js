@@ -2,58 +2,51 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.startListingExpiryJob = startListingExpiryJob;
 exports.stopListingExpiryJob = stopListingExpiryJob;
-const bullmq_1 = require("bullmq");
-const redis_1 = require("../config/redis");
-const Listing_1 = require("../modules/listings/models/Listing");
-const listingService_1 = require("../modules/listings/listingService");
-const QUEUE_NAME = 'listing-expiry';
-let expiryQueue = null;
-let expiryWorker = null;
+const supabase_1 = require("../config/supabase");
+let expiryInterval = null;
 async function processExpiredListings() {
-    const now = new Date();
-    const expired = await Listing_1.Listing.find({
-        status: 'published',
-        expiresAt: { $lt: now },
-    });
-    for (const listing of expired) {
-        listing.status = 'archived';
-        await listing.save();
-        await (0, listingService_1.invalidateListingCache)(listing._id.toString());
-        console.log(`[listingExpiryJob] Archived expired listing: ${listing._id}`);
+    const now = new Date().toISOString();
+    // Find published listings that have expired
+    const { data: expired, error: fetchError } = await supabase_1.supabase
+        .from('listings')
+        .select('id')
+        .eq('status', 'published')
+        .lt('expires_at', now);
+    if (fetchError) {
+        console.error('[listingExpiryJob] Failed to fetch expired listings:', fetchError.message);
+        return;
     }
-    if (expired.length > 0) {
-        console.log(`[listingExpiryJob] Archived ${expired.length} expired listing(s)`);
+    if (expired && expired.length > 0) {
+        const expiredIds = expired.map(l => l.id);
+        // Update them to 'archived'
+        const { error: updateError } = await supabase_1.supabase
+            .from('listings')
+            .update({ status: 'archived' })
+            .in('id', expiredIds);
+        if (updateError) {
+            console.error('[listingExpiryJob] Failed to archive listings:', updateError.message);
+        }
+        else {
+            console.log(`[listingExpiryJob] Archived ${expired.length} expired listing(s)`);
+        }
     }
 }
 function startListingExpiryJob() {
-    const connection = (0, redis_1.getRedisClient)();
-    expiryQueue = new bullmq_1.Queue(QUEUE_NAME, { connection });
-    // Schedule repeatable job every hour
-    expiryQueue
-        .add('expire-listings', {}, {
-        repeat: { every: 60 * 60 * 1000 }, // every hour in ms
-        jobId: 'listing-expiry-repeatable',
-    })
-        .catch((err) => console.error('[listingExpiryJob] Failed to schedule job:', err));
-    expiryWorker = new bullmq_1.Worker(QUEUE_NAME, async () => {
-        await processExpiredListings();
-    }, { connection });
-    expiryWorker.on('completed', () => {
-        console.log('[listingExpiryJob] Expiry check completed');
-    });
-    expiryWorker.on('failed', (_job, err) => {
-        console.error('[listingExpiryJob] Expiry check failed:', err);
-    });
-    console.log('✅ Listing expiry job scheduled (every hour)');
+    if (expiryInterval)
+        return;
+    // Run immediately on start
+    processExpiredListings().catch(err => console.error('[listingExpiryJob] Initial check failed:', err));
+    // Then schedule every hour
+    expiryInterval = setInterval(() => {
+        processExpiredListings().catch(err => console.error('[listingExpiryJob] Recurring check failed:', err));
+    }, 60 * 60 * 1000);
+    console.log('✅ Listing expiry check started (every hour)');
 }
 async function stopListingExpiryJob() {
-    if (expiryWorker) {
-        await expiryWorker.close();
-        expiryWorker = null;
-    }
-    if (expiryQueue) {
-        await expiryQueue.close();
-        expiryQueue = null;
+    if (expiryInterval) {
+        clearInterval(expiryInterval);
+        expiryInterval = null;
+        console.log('[listingExpiryJob] Listing expiry check stopped');
     }
 }
 //# sourceMappingURL=listingExpiryJob.js.map

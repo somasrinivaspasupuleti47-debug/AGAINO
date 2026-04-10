@@ -15,9 +15,7 @@ const crypto_1 = __importDefault(require("crypto"));
 const bcrypt_1 = __importDefault(require("bcrypt"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const uuid_1 = require("uuid");
-const User_1 = require("./models/User");
-const OTP_1 = require("./models/OTP");
-const RefreshToken_1 = require("./models/RefreshToken");
+const supabase_1 = require("../../config/supabase");
 const AppError_1 = require("../../utils/AppError");
 const emailQueue_1 = require("../../jobs/emailQueue");
 const env_1 = require("../../config/env");
@@ -26,29 +24,45 @@ const OTP_EXPIRY_MINUTES = 10;
 async function registerUser(input) {
     const { email, displayName, password } = input;
     // Check for duplicate email
-    const existing = await User_1.User.findOne({ email: email.toLowerCase() });
+    const { data: existing } = await supabase_1.supabase
+        .from('users')
+        .select('id')
+        .eq('email', email.toLowerCase())
+        .single();
     if (existing) {
         throw new AppError_1.AppError('Email already in use', 409);
     }
     // Hash password
     const passwordHash = await bcrypt_1.default.hash(password, BCRYPT_COST);
     // Create user
-    const user = await User_1.User.create({
+    const { data: user, error: userError } = await supabase_1.supabase
+        .from('users')
+        .insert({
         email: email.toLowerCase(),
-        displayName,
-        passwordHash,
-        isVerified: false,
-    });
+        display_name: displayName,
+        password_hash: passwordHash,
+        is_verified: false,
+    })
+        .select()
+        .single();
+    if (userError || !user) {
+        throw new AppError_1.AppError(`User creation failed: ${userError?.message}`, 500);
+    }
     // Generate 6-digit OTP
     const otpCode = crypto_1.default.randomInt(100000, 999999).toString();
     const codeHash = await bcrypt_1.default.hash(otpCode, BCRYPT_COST);
-    const expiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
-    await OTP_1.OTP.create({ userId: user._id, codeHash, expiresAt });
+    const expiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000).toISOString();
+    const { error: otpError } = await supabase_1.supabase
+        .from('otps')
+        .insert({ user_id: user.id, code_hash: codeHash, expires_at: expiresAt });
+    if (otpError) {
+        console.warn('Failed to store OTP:', otpError.message);
+    }
     // Log OTP in development so it can be used without email setup
     if (env_1.env.NODE_ENV !== 'production') {
         console.log(`\n📧 OTP for ${user.email}: ${otpCode}\n`);
     }
-    // Enqueue OTP email — fire and forget, don't fail registration if this errors
+    // Enqueue OTP email
     (0, emailQueue_1.enqueueOtpEmail)(user.email, otpCode).catch((err) => console.warn('Failed to enqueue OTP email:', err?.message));
     return user;
 }
@@ -58,98 +72,127 @@ async function generateTokens(userId, email, role) {
     });
     const rawToken = (0, uuid_1.v4)();
     const hashedToken = await bcrypt_1.default.hash(rawToken, BCRYPT_COST);
-    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-    await RefreshToken_1.RefreshToken.create({ userId, token: hashedToken, expiresAt });
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    await supabase_1.supabase
+        .from('refresh_tokens')
+        .insert({ user_id: userId, token: hashedToken, expires_at: expiresAt });
     return { accessToken, refreshToken: rawToken };
 }
 async function loginUser(input) {
     const { email, password } = input;
-    const user = await User_1.User.findOne({ email: email.toLowerCase() });
-    if (!user || user.isBlocked) {
+    const { data: user } = await supabase_1.supabase
+        .from('users')
+        .select('*')
+        .eq('email', email.toLowerCase())
+        .single();
+    if (!user || user.is_blocked) {
         throw new AppError_1.AppError('Invalid credentials', 401);
     }
-    const passwordMatch = await bcrypt_1.default.compare(password, user.passwordHash);
+    const passwordMatch = await bcrypt_1.default.compare(password, user.password_hash);
     if (!passwordMatch) {
         throw new AppError_1.AppError('Invalid credentials', 401);
     }
-    if (!user.isVerified) {
+    if (!user.is_verified) {
         throw new AppError_1.AppError('Email not verified', 403);
     }
-    const tokens = await generateTokens(user._id.toString(), user.email, user.role);
+    const tokens = await generateTokens(user.id, user.email, user.role);
     return {
         ...tokens,
         user: {
-            id: user._id.toString(),
+            id: user.id,
             email: user.email,
-            displayName: user.displayName,
+            displayName: user.display_name,
             role: user.role,
         },
     };
 }
 async function refreshTokens(input) {
     const { token } = input;
-    const storedTokens = await RefreshToken_1.RefreshToken.find({ expiresAt: { $gt: new Date() } });
+    const { data: storedTokens } = await supabase_1.supabase
+        .from('refresh_tokens')
+        .select('*')
+        .gt('expires_at', new Date().toISOString());
     let matchedToken = null;
-    for (const stored of storedTokens) {
-        const isMatch = await bcrypt_1.default.compare(token, stored.token);
-        if (isMatch) {
-            matchedToken = stored;
-            break;
+    if (storedTokens) {
+        for (const stored of storedTokens) {
+            const isMatch = await bcrypt_1.default.compare(token, stored.token);
+            if (isMatch) {
+                matchedToken = stored;
+                break;
+            }
         }
     }
     if (!matchedToken) {
         throw new AppError_1.AppError('Invalid or expired refresh token', 401);
     }
-    const userId = matchedToken.userId.toString();
-    await RefreshToken_1.RefreshToken.deleteOne({ _id: matchedToken._id });
+    const userId = matchedToken.user_id;
+    await supabase_1.supabase.from('refresh_tokens').delete().eq('id', matchedToken.id);
     // Fetch user to get current email and role
-    const user = await User_1.User.findById(userId);
-    if (!user || user.isBlocked) {
+    const { data: user } = await supabase_1.supabase
+        .from('users')
+        .select('*')
+        .eq('id', userId)
+        .single();
+    if (!user || user.is_blocked) {
         throw new AppError_1.AppError('User not found or blocked', 401);
     }
     return generateTokens(userId, user.email, user.role);
 }
 async function logoutUser(input) {
-    await RefreshToken_1.RefreshToken.deleteMany({ userId: input.userId });
+    await supabase_1.supabase.from('refresh_tokens').delete().eq('user_id', input.userId);
 }
 async function verifyOtp(input) {
     const { email, otp } = input;
-    const user = await User_1.User.findOne({ email: email.toLowerCase() });
+    const { data: user } = await supabase_1.supabase
+        .from('users')
+        .select('*')
+        .eq('email', email.toLowerCase())
+        .single();
     if (!user) {
         throw new AppError_1.AppError('User not found', 404);
     }
-    const otpDoc = await OTP_1.OTP.findOne({
-        userId: user._id,
-        expiresAt: { $gt: new Date() },
-    }).sort({ createdAt: -1 });
+    const { data: otps } = await supabase_1.supabase
+        .from('otps')
+        .select('*')
+        .eq('user_id', user.id)
+        .gt('expires_at', new Date().toISOString())
+        .order('created_at', { ascending: false })
+        .limit(1);
+    const otpDoc = otps && otps[0];
     if (!otpDoc) {
         throw new AppError_1.AppError('OTP expired or not found', 400);
     }
-    const valid = await bcrypt_1.default.compare(otp, otpDoc.codeHash);
+    const valid = await bcrypt_1.default.compare(otp, otpDoc.code_hash);
     if (!valid) {
         throw new AppError_1.AppError('Invalid OTP', 400);
     }
-    await OTP_1.OTP.deleteOne({ _id: otpDoc._id });
-    user.isVerified = true;
-    await user.save();
-    const tokens = await generateTokens(user._id.toString(), user.email, user.role);
+    await supabase_1.supabase.from('otps').delete().eq('id', otpDoc.id);
+    await supabase_1.supabase
+        .from('users')
+        .update({ is_verified: true })
+        .eq('id', user.id);
+    const tokens = await generateTokens(user.id, user.email, user.role);
     return {
         ...tokens,
         user: {
-            id: user._id.toString(),
+            id: user.id,
             email: user.email,
-            displayName: user.displayName,
+            displayName: user.display_name,
             role: user.role,
         },
     };
 }
 async function forgotPassword(input) {
     const { email } = input;
-    const user = await User_1.User.findOne({ email: email.toLowerCase() });
+    const { data: user } = await supabase_1.supabase
+        .from('users')
+        .select('id, email')
+        .eq('email', email.toLowerCase())
+        .single();
     // Silently succeed if user not found (security: don't reveal email existence)
     if (!user)
         return;
-    const token = jsonwebtoken_1.default.sign({ userId: user._id.toString() }, env_1.env.ACCESS_TOKEN_SECRET, {
+    const token = jsonwebtoken_1.default.sign({ userId: user.id }, env_1.env.ACCESS_TOKEN_SECRET, {
         expiresIn: '30m',
         subject: 'password-reset',
     });
@@ -158,7 +201,8 @@ async function forgotPassword(input) {
         console.log(`\n🔑 Password reset URL for ${user.email}: ${resetUrl}\n`);
     }
     // Fire and forget
-    (0, emailQueue_1.enqueuePasswordResetEmail)(user.email, resetUrl).catch((err) => console.warn('Failed to enqueue reset email:', err?.message));
+    const { enqueuePasswordResetEmail } = require('../../jobs/emailQueue');
+    enqueuePasswordResetEmail(user.email, resetUrl).catch((err) => console.warn('Failed to enqueue reset email:', err?.message));
 }
 async function resetPassword(input) {
     const { token, password } = input;
@@ -171,12 +215,19 @@ async function resetPassword(input) {
     catch {
         throw new AppError_1.AppError('Invalid or expired reset token', 400);
     }
-    const user = await User_1.User.findById(payload.userId);
+    const { data: user } = await supabase_1.supabase
+        .from('users')
+        .select('id')
+        .eq('id', payload.userId)
+        .single();
     if (!user) {
         throw new AppError_1.AppError('User not found', 404);
     }
-    user.passwordHash = await bcrypt_1.default.hash(password, BCRYPT_COST);
-    await user.save();
-    await logoutUser({ userId: user._id.toString() });
+    const passwordHash = await bcrypt_1.default.hash(password, BCRYPT_COST);
+    await supabase_1.supabase
+        .from('users')
+        .update({ password_hash: passwordHash })
+        .eq('id', user.id);
+    await logoutUser({ userId: user.id });
 }
 //# sourceMappingURL=authService.js.map

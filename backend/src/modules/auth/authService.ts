@@ -2,11 +2,9 @@ import crypto from 'crypto';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
-import { User, IUser } from './models/User';
-import { OTP } from './models/OTP';
-import { RefreshToken } from './models/RefreshToken';
+import { supabase } from '../../config/supabase';
 import { AppError } from '../../utils/AppError';
-import { enqueueOtpEmail, enqueuePasswordResetEmail } from '../../jobs/emailQueue';
+import { enqueueOtpEmail } from '../../jobs/emailQueue';
 import { env } from '../../config/env';
 
 const BCRYPT_COST = 12;
@@ -18,11 +16,16 @@ interface RegisterInput {
   password: string;
 }
 
-export async function registerUser(input: RegisterInput): Promise<IUser> {
+export async function registerUser(input: RegisterInput): Promise<any> {
   const { email, displayName, password } = input;
 
   // Check for duplicate email
-  const existing = await User.findOne({ email: email.toLowerCase() });
+  const { data: existing } = await supabase
+    .from('users')
+    .select('id')
+    .eq('email', email.toLowerCase())
+    .single();
+
   if (existing) {
     throw new AppError('Email already in use', 409);
   }
@@ -31,26 +34,41 @@ export async function registerUser(input: RegisterInput): Promise<IUser> {
   const passwordHash = await bcrypt.hash(password, BCRYPT_COST);
 
   // Create user
-  const user = await User.create({
-    email: email.toLowerCase(),
-    displayName,
-    passwordHash,
-    isVerified: false,
-  });
+  const { data: user, error: userError } = await supabase
+    .from('users')
+    .insert({
+      email: email.toLowerCase(),
+      display_name: displayName,
+      password_hash: passwordHash,
+      is_verified: false,
+    })
+    .select()
+    .single();
+
+  if (userError || !user) {
+    throw new AppError(`User creation failed: ${userError?.message}`, 500);
+  }
 
   // Generate 6-digit OTP
   const otpCode = crypto.randomInt(100000, 999999).toString();
   const codeHash = await bcrypt.hash(otpCode, BCRYPT_COST);
 
-  const expiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
-  await OTP.create({ userId: user._id, codeHash, expiresAt });
+  const expiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000).toISOString();
+  
+  const { error: otpError } = await supabase
+    .from('otps')
+    .insert({ user_id: user.id, code_hash: codeHash, expires_at: expiresAt });
+
+  if (otpError) {
+    console.warn('Failed to store OTP:', otpError.message);
+  }
 
   // Log OTP in development so it can be used without email setup
   if (env.NODE_ENV !== 'production') {
     console.log(`\n📧 OTP for ${user.email}: ${otpCode}\n`);
   }
 
-  // Enqueue OTP email — fire and forget, don't fail registration if this errors
+  // Enqueue OTP email
   enqueueOtpEmail(user.email, otpCode).catch((err) =>
     console.warn('Failed to enqueue OTP email:', err?.message),
   );
@@ -76,8 +94,11 @@ export async function generateTokens(
 
   const rawToken = uuidv4();
   const hashedToken = await bcrypt.hash(rawToken, BCRYPT_COST);
-  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-  await RefreshToken.create({ userId, token: hashedToken, expiresAt });
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  
+  await supabase
+    .from('refresh_tokens')
+    .insert({ user_id: userId, token: hashedToken, expires_at: expiresAt });
 
   return { accessToken, refreshToken: rawToken };
 }
@@ -101,22 +122,27 @@ export interface LoginResult extends TokenPair {
 export async function loginUser(input: LoginInput): Promise<LoginResult> {
   const { email, password } = input;
 
-  const user = await User.findOne({ email: email.toLowerCase() });
-  if (!user || user.isBlocked) {
+  const { data: user } = await supabase
+    .from('users')
+    .select('*')
+    .eq('email', email.toLowerCase())
+    .single();
+
+  if (!user || user.is_blocked) {
     throw new AppError('Invalid credentials', 401);
   }
 
-  const passwordMatch = await bcrypt.compare(password, user.passwordHash);
+  const passwordMatch = await bcrypt.compare(password, user.password_hash);
   if (!passwordMatch) {
     throw new AppError('Invalid credentials', 401);
   }
 
-  if (!user.isVerified) {
+  if (!user.is_verified) {
     throw new AppError('Email not verified', 403);
   }
 
   const tokens = await generateTokens(
-    (user._id as unknown as string).toString(),
+    user.id,
     user.email,
     user.role,
   );
@@ -124,9 +150,9 @@ export async function loginUser(input: LoginInput): Promise<LoginResult> {
   return {
     ...tokens,
     user: {
-      id: (user._id as unknown as string).toString(),
+      id: user.id,
       email: user.email,
-      displayName: user.displayName,
+      displayName: user.display_name,
       role: user.role,
     },
   };
@@ -141,14 +167,19 @@ interface RefreshInput {
 export async function refreshTokens(input: RefreshInput): Promise<TokenPair> {
   const { token } = input;
 
-  const storedTokens = await RefreshToken.find({ expiresAt: { $gt: new Date() } });
+  const { data: storedTokens } = await supabase
+    .from('refresh_tokens')
+    .select('*')
+    .gt('expires_at', new Date().toISOString());
 
-  let matchedToken: (typeof storedTokens)[0] | null = null;
-  for (const stored of storedTokens) {
-    const isMatch = await bcrypt.compare(token, stored.token);
-    if (isMatch) {
-      matchedToken = stored;
-      break;
+  let matchedToken: any = null;
+  if (storedTokens) {
+    for (const stored of storedTokens) {
+      const isMatch = await bcrypt.compare(token, stored.token);
+      if (isMatch) {
+        matchedToken = stored;
+        break;
+      }
     }
   }
 
@@ -156,12 +187,17 @@ export async function refreshTokens(input: RefreshInput): Promise<TokenPair> {
     throw new AppError('Invalid or expired refresh token', 401);
   }
 
-  const userId = matchedToken.userId.toString();
-  await RefreshToken.deleteOne({ _id: matchedToken._id });
+  const userId = matchedToken.user_id;
+  await supabase.from('refresh_tokens').delete().eq('id', matchedToken.id);
 
   // Fetch user to get current email and role
-  const user = await User.findById(userId);
-  if (!user || user.isBlocked) {
+  const { data: user } = await supabase
+    .from('users')
+    .select('*')
+    .eq('id', userId)
+    .single();
+
+  if (!user || user.is_blocked) {
     throw new AppError('User not found or blocked', 401);
   }
 
@@ -175,7 +211,7 @@ interface LogoutInput {
 }
 
 export async function logoutUser(input: LogoutInput): Promise<void> {
-  await RefreshToken.deleteMany({ userId: input.userId });
+  await supabase.from('refresh_tokens').delete().eq('user_id', input.userId);
 }
 
 // ── OTP verification ──────────────────────────────────────────────────────────
@@ -197,32 +233,44 @@ export interface VerifyOtpResult extends TokenPair {
 export async function verifyOtp(input: VerifyOtpInput): Promise<VerifyOtpResult> {
   const { email, otp } = input;
 
-  const user = await User.findOne({ email: email.toLowerCase() });
+  const { data: user } = await supabase
+    .from('users')
+    .select('*')
+    .eq('email', email.toLowerCase())
+    .single();
+
   if (!user) {
     throw new AppError('User not found', 404);
   }
 
-  const otpDoc = await OTP.findOne({
-    userId: user._id,
-    expiresAt: { $gt: new Date() },
-  }).sort({ createdAt: -1 });
+  const { data: otps } = await supabase
+    .from('otps')
+    .select('*')
+    .eq('user_id', user.id)
+    .gt('expires_at', new Date().toISOString())
+    .order('created_at', { ascending: false })
+    .limit(1);
+
+  const otpDoc = otps && otps[0];
 
   if (!otpDoc) {
     throw new AppError('OTP expired or not found', 400);
   }
 
-  const valid = await bcrypt.compare(otp, otpDoc.codeHash);
+  const valid = await bcrypt.compare(otp, otpDoc.code_hash);
   if (!valid) {
     throw new AppError('Invalid OTP', 400);
   }
 
-  await OTP.deleteOne({ _id: otpDoc._id });
+  await supabase.from('otps').delete().eq('id', otpDoc.id);
 
-  user.isVerified = true;
-  await user.save();
+  await supabase
+    .from('users')
+    .update({ is_verified: true })
+    .eq('id', user.id);
 
   const tokens = await generateTokens(
-    (user._id as unknown as string).toString(),
+    user.id,
     user.email,
     user.role,
   );
@@ -230,9 +278,9 @@ export async function verifyOtp(input: VerifyOtpInput): Promise<VerifyOtpResult>
   return {
     ...tokens,
     user: {
-      id: (user._id as unknown as string).toString(),
+      id: user.id,
       email: user.email,
-      displayName: user.displayName,
+      displayName: user.display_name,
       role: user.role,
     },
   };
@@ -247,12 +295,17 @@ interface ForgotPasswordInput {
 export async function forgotPassword(input: ForgotPasswordInput): Promise<void> {
   const { email } = input;
 
-  const user = await User.findOne({ email: email.toLowerCase() });
+  const { data: user } = await supabase
+    .from('users')
+    .select('id, email')
+    .eq('email', email.toLowerCase())
+    .single();
+
   // Silently succeed if user not found (security: don't reveal email existence)
   if (!user) return;
 
   const token = jwt.sign(
-    { userId: (user._id as unknown as string).toString() },
+    { userId: user.id },
     env.ACCESS_TOKEN_SECRET,
     {
       expiresIn: '30m',
@@ -267,7 +320,8 @@ export async function forgotPassword(input: ForgotPasswordInput): Promise<void> 
   }
 
   // Fire and forget
-  enqueuePasswordResetEmail(user.email, resetUrl).catch((err) =>
+  const { enqueuePasswordResetEmail } = require('../../jobs/emailQueue');
+  enqueuePasswordResetEmail(user.email, resetUrl).catch((err: any) =>
     console.warn('Failed to enqueue reset email:', err?.message),
   );
 }
@@ -291,13 +345,21 @@ export async function resetPassword(input: ResetPasswordInput): Promise<void> {
     throw new AppError('Invalid or expired reset token', 400);
   }
 
-  const user = await User.findById(payload.userId);
+  const { data: user } = await supabase
+    .from('users')
+    .select('id')
+    .eq('id', payload.userId)
+    .single();
+
   if (!user) {
     throw new AppError('User not found', 404);
   }
 
-  user.passwordHash = await bcrypt.hash(password, BCRYPT_COST);
-  await user.save();
+  const passwordHash = await bcrypt.hash(password, BCRYPT_COST);
+  await supabase
+    .from('users')
+    .update({ password_hash: passwordHash })
+    .eq('id', user.id);
 
-  await logoutUser({ userId: (user._id as unknown as string).toString() });
+  await logoutUser({ userId: user.id });
 }

@@ -1,10 +1,9 @@
-import { IUser } from './models/User';
 interface RegisterInput {
     email: string;
     displayName: string;
     password: string;
 }
-export declare function registerUser(input: RegisterInput): Promise<IUser>;
+export declare function registerUser(input: RegisterInput): Promise<any>;
 export interface TokenPair {
     accessToken: string;
     refreshToken: string;

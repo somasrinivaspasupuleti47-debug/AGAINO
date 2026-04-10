@@ -93,7 +93,7 @@ function SearchContent() {
         </div>
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {listings.map((l) => <ListingCard key={l._id} listing={l} />)}
+          {listings.map((l) => <ListingCard key={l.id} listing={l} />)}
         </div>
       )}
     </div>

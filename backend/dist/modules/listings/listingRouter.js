@@ -18,6 +18,8 @@ exports.listingRouter.patch('/:id/publish', auth_1.requireAuth, listingControlle
 exports.listingRouter.patch('/:id/sold', auth_1.requireAuth, listingController_1.handleMarkSold);
 // Image upload
 exports.listingRouter.post('/:id/images', auth_1.requireAuth, upload_1.uploadImages, upload_1.validateImageMimeTypes, upload_1.handleUploadErrors, listingController_1.handleUploadImages);
+// Generic upload endpoint that doesn't need DB update
+exports.listingRouter.post('/upload', upload_1.uploadImages, upload_1.validateImageMimeTypes, upload_1.handleUploadErrors, listingController_1.handleDirectUploadImages);
 // Error handler
 exports.listingRouter.use(listingController_1.listingErrorHandler);
 //# sourceMappingURL=listingRouter.js.map

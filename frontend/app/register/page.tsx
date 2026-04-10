@@ -3,14 +3,13 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { auth } from '@/lib/firebase';
-import { createUserWithEmailAndPassword, sendEmailVerification } from 'firebase/auth';
-import { supabase } from '@/lib/supabase';
+import api from '@/lib/api';
 
 export default function RegisterPage() {
   const router = useRouter();
 
   const [form, setForm] = useState({
+    displayName: '',
     email: '',
     password: '',
   });
@@ -24,40 +23,15 @@ export default function RegisterPage() {
     setError('');
 
     try {
-      const userCredential = await createUserWithEmailAndPassword(auth, form.email, form.password);
-      
-      if (!userCredential.user) {
-        throw new Error('User already exists. Please login.');
-      }
-
-      // Send Firebase Email Verification link
-      await sendEmailVerification(userCredential.user);
-
-// Save user details to Supabase 'dashboard' table
-      const { error: dbError } = await supabase.from('dashboard').insert({
-        id: userCredential.user.uid,
+      const { data } = await api.post('/auth/register', {
+        displayName: form.displayName,
         email: form.email,
-        created_at: new Date().toISOString(),
+        password: form.password
       });
 
-      // Also insert into dedicated 'users' table for admin reports
-      const { error: usersError } = await supabase.from('users').insert({
-        id: userCredential.user.uid,
-        email: form.email,
-        created_at: new Date().toISOString(),
-      });
-
-      if (dbError) {
-        console.warn('Failed to save to Supabase dashboard:', dbError);
-      }
-      if (usersError) {
-        console.warn('Failed to save to Supabase users table:', usersError);
-      }
-
-      alert('Registration successful! Please check your email to verify your account.');
-      router.push('/login');
+      router.push(`/verify-otp?email=${encodeURIComponent(form.email)}`);
     } catch (err: any) {
-      setError(err.message || 'Signup failed');
+      setError(err.response?.data?.message || err.message || 'Signup failed');
     } finally {
       setLoading(false);
     }
@@ -67,7 +41,7 @@ export default function RegisterPage() {
     <div className="min-h-screen flex items-center justify-center bg-orange-50 px-4">
       <div className="bg-white rounded-2xl shadow-lg p-8 w-full max-w-md">
 
-        <h1 className="text-2xl font-bold text-center mb-2">
+        <h1 className="text-2xl font-bold text-center mb-2 text-orange-500">
           Create Account
         </h1>
 
@@ -82,6 +56,16 @@ export default function RegisterPage() {
         )}
 
         <form onSubmit={submit} className="space-y-4">
+          <input
+            type="text"
+            placeholder="Full Name"
+            value={form.displayName}
+            onChange={(e) =>
+              setForm({ ...form, displayName: e.target.value })
+            }
+            className="w-full border rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-orange-400"
+            required
+          />
 
           <input
             type="email"

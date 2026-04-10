@@ -18,7 +18,7 @@ app.use(
         scriptSrc: ["'self'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: ["'self'", 'data:', 'https:', 'http:'],
-        connectSrc: ["'self'", 'http://localhost:3000'],
+        connectSrc: ["'self'", env.FRONTEND_URL],
         fontSrc: ["'self'"],
         objectSrc: ["'none'"],
         frameSrc: ["'none'"],

@@ -3,8 +3,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { auth } from '@/lib/firebase';
-import { onAuthStateChanged } from 'firebase/auth';
+import { getSession } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import {
   Users, UserCheck, ShoppingBag, ArrowLeft, Search,
@@ -20,7 +19,7 @@ interface DashboardUser {
 }
 
 interface Listing {
-  _id: string;
+  id: string;
   seller_id: string;
   status: string;
   price: number;
@@ -46,29 +45,27 @@ export default function AdminUsersPage() {
   const [filter, setFilter] = useState<'all' | 'sellers' | 'sold'>('all');
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (u) => {
-      if (!u || u.email !== ADMIN_EMAIL) {
-        router.push('/login');
-        return;
-      }
-      await fetchData();
-    });
-    return () => unsub();
+    const session = getSession();
+    if (!session || session.email !== ADMIN_EMAIL) {
+      router.push('/login');
+      return;
+    }
+    fetchData();
   }, []);
 
   const fetchData = async () => {
     setLoading(true);
 
-    // Fetch all registered users from the dashboard table
+    // Fetch all registered users from the users table
     const { data: dashboardUsers } = await supabase
-      .from('dashboard')
+      .from('users')
       .select('*')
       .order('created_at', { ascending: false });
 
     // Fetch all listings
     const { data: allListings } = await supabase
       .from('listings')
-      .select('_id, seller_id, status, price, title');
+      .select('id, seller_id, status, price, title');
 
     const usersList = (dashboardUsers as DashboardUser[]) || [];
     const listings = (allListings as Listing[]) || [];

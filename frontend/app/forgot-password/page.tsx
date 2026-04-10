@@ -13,12 +13,10 @@ export default function ForgotPasswordPage() {
     e.preventDefault();
     setLoading(true); setError('');
     try {
-      const { sendPasswordResetEmail } = await import('firebase/auth');
-      const { auth } = await import('@/lib/firebase');
-      await sendPasswordResetEmail(auth, email);
+      await api.post('/auth/forgot-password', { email });
       setSent(true);
     } catch (err: any) {
-      setError(err.message || 'Something went wrong');
+      setError(err.response?.data?.message || err.message || 'Something went wrong');
     } finally { setLoading(false); }
   };
 

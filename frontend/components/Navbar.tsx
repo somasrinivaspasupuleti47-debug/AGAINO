@@ -4,8 +4,8 @@ import { useEffect, useState, useRef } from 'react';
 import { ShoppingBag, Search, Plus, LogOut, ChevronDown, User, Moon, Sun } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { motion, AnimatePresence } from 'framer-motion';
-import { auth } from '@/lib/firebase';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { getSession, logout as authLogout } from '@/lib/auth';
+import { getImageUrl } from '@/lib/api';
 
 import { usePathname } from 'next/navigation';
 
@@ -22,10 +22,9 @@ export default function Navbar() {
   useEffect(() => {
     setMounted(true);
     
-    // Subscribe to Firebase auth state changes
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-    });
+    // Get current session from our new auth utility
+    const session = getSession();
+    setUser(session);
 
     const handleClickOutside = (e: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
@@ -36,13 +35,11 @@ export default function Navbar() {
     
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
-      unsubscribe();
     };
-  }, []);
+  }, [pathname]); // Check session on route changes
 
-  const logout = async () => {
-    await signOut(auth);
-    window.location.href = '/';
+  const logout = () => {
+    authLogout();
   };
 
   // Hide navbar entirely on the landing page
@@ -51,8 +48,8 @@ export default function Navbar() {
   return (
     <nav className="fixed w-full top-0 z-50 glass border-b border-border/50">
       <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
-        <Link href="/" className="flex items-center gap-2 font-bold text-xl drop-shadow-sm transition-transform hover:scale-105 active:scale-95">
-          <img src="/logo.png" alt="AGAINO Logo" className="h-9 w-auto object-contain dark:invert" />
+        <Link href="/" className="flex items-center font-black text-2xl tracking-tighter text-orange-500 drop-shadow-sm transition-transform hover:scale-105 active:scale-95">
+          AGAINO
         </Link>
 
         {pathname !== '/' && (
@@ -84,7 +81,7 @@ export default function Navbar() {
                 >
                   <div className="w-8 h-8 bg-primary/10 text-primary rounded-full flex items-center justify-center font-bold text-sm overflow-hidden border border-primary/20">
                     {user.avatar ? (
-                      <img src={user.avatar.startsWith('http') ? user.avatar : `http://localhost:4000${user.avatar}`} alt="avatar" className="w-full h-full object-cover" />
+                      <img src={getImageUrl(user.avatar)} alt="avatar" className="w-full h-full object-cover" />
                     ) : (
                       user.displayName?.[0]?.toUpperCase()
                     )}

@@ -18,13 +18,13 @@ function ResetPasswordContent() {
     if (password !== confirm) { setError('Passwords do not match'); return; }
     setLoading(true); setError('');
     try {
-      const { confirmPasswordReset } = await import('firebase/auth');
-      const { auth } = await import('@/lib/firebase');
-      // In firebase, the token is called 'oobCode' in the URL usually, so 'token' from our params is used as oobCode
-      await confirmPasswordReset(auth, token, password);
+      await api.post('/auth/reset-password', {
+        token,
+        password
+      });
       router.push('/login?reset=success');
     } catch (err: any) {
-      setError(err.message || 'Reset failed. Link may have expired.');
+      setError(err.response?.data?.message || err.message || 'Reset failed. Link may have expired.');
     } finally { setLoading(false); }
   };
 

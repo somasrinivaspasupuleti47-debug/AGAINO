@@ -5,7 +5,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import { v4 as uuidv4 } from 'uuid';
 import { requireAuth } from '../../middleware/auth';
-import { User } from './models/User';
+import { supabase } from '../../config/supabase';
 
 const storage = multer.memoryStorage();
 const upload = multer({ storage, limits: { fileSize: 5 * 1024 * 1024, files: 1 } });
@@ -34,7 +34,12 @@ avatarRouter.post(
       const avatarUrl = `/uploads/avatars/${filename}`;
 
       // Delete old avatar file if exists
-      const user = await User.findById(req.user!.userId);
+      const { data: user } = await supabase
+        .from('users')
+        .select('avatar')
+        .eq('id', req.user!.userId)
+        .single();
+
       if (user?.avatar && user.avatar.startsWith('/uploads/')) {
         const oldPath = path.resolve(
           __dirname,
@@ -44,7 +49,10 @@ avatarRouter.post(
         await fs.unlink(oldPath).catch(() => {});
       }
 
-      await User.findByIdAndUpdate(req.user!.userId, { avatar: avatarUrl });
+      await supabase
+        .from('users')
+        .update({ avatar: avatarUrl })
+        .eq('id', req.user!.userId);
 
       res.json({ status: 'success', avatar: avatarUrl });
     } catch (err) {

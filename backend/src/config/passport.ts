@@ -1,6 +1,6 @@
 import passport from 'passport';
 import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
-import { User } from '../modules/auth/models/User';
+import { supabase } from './supabase';
 import { env } from './env';
 
 // Only register Google strategy when credentials are configured
@@ -19,23 +19,44 @@ if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
             return done(new Error('No email returned from Google'), undefined);
           }
 
-          let user = await User.findOne({ $or: [{ googleId: profile.id }, { email }] });
+          // Check for user by google_id or email
+          const { data: existingUser } = await supabase
+            .from('users')
+            .select('*')
+            .or(`google_id.eq.${profile.id},email.eq.${email}`)
+            .single();
+
+          let user = existingUser;
 
           if (!user) {
-            user = await User.create({
-              email,
-              displayName: profile.displayName,
-              passwordHash: '',
-              googleId: profile.id,
-              avatar: profile.photos?.[0]?.value,
-              isVerified: true,
-            });
-          } else if (!user.googleId) {
-            user.googleId = profile.id;
-            if (!user.avatar && profile.photos?.[0]?.value) {
-              user.avatar = profile.photos[0].value;
-            }
-            await user.save();
+            const { data: newUser, error: createError } = await supabase
+              .from('users')
+              .insert({
+                email,
+                display_name: profile.displayName,
+                password_hash: '',
+                google_id: profile.id,
+                avatar: profile.photos?.[0]?.value,
+                is_verified: true,
+              })
+              .select()
+              .single();
+            
+            if (createError) throw createError;
+            user = newUser;
+          } else if (!user.google_id) {
+            const { data: updatedUser, error: updateError } = await supabase
+              .from('users')
+              .update({
+                google_id: profile.id,
+                avatar: user.avatar || profile.photos?.[0]?.value,
+              })
+              .eq('id', user.id)
+              .select()
+              .single();
+            
+            if (updateError) throw updateError;
+            user = updatedUser;
           }
 
           return done(null, user);

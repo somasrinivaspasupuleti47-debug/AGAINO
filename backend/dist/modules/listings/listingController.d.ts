@@ -8,5 +8,6 @@ export declare function handleMarkSold(req: Request, res: Response, next: NextFu
 export declare function handleGetPublicFeed(req: Request, res: Response, next: NextFunction): Promise<void>;
 export declare function handleGetListingById(req: Request, res: Response, next: NextFunction): Promise<void>;
 export declare function handleUploadImages(req: Request, res: Response, next: NextFunction): Promise<void>;
+export declare function handleDirectUploadImages(req: Request, res: Response, next: NextFunction): Promise<void>;
 export declare function listingErrorHandler(err: Error, _req: Request, res: Response, next: NextFunction): void;
 //# sourceMappingURL=listingController.d.ts.map

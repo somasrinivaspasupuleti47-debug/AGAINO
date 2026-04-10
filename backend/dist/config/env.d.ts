@@ -2,6 +2,8 @@ export declare const env: {
     NODE_ENV: "development" | "production" | "test";
     PORT: number;
     MONGODB_URI: string;
+    SUPABASE_URL: string;
+    SUPABASE_ANON_KEY: string;
     REDIS_URL: string;
     ACCESS_TOKEN_SECRET: string;
     REFRESH_TOKEN_SECRET: string;

@@ -1,11 +1,10 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { getSession } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
 import ListingCard from '@/components/ListingCard';
 import Link from 'next/link';
 import { Search, Plus } from 'lucide-react';
-import { auth } from '@/lib/firebase';
-import { onAuthStateChanged } from 'firebase/auth';
 
 const ADMIN_EMAIL = 'somasrinivaspasupuleti47@gmail.com';
 
@@ -15,14 +14,13 @@ export default function HomePage() {
   const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
-    // Check if user is admin
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (user && user.email === ADMIN_EMAIL) {
-        setIsAdmin(true);
-      } else {
-        setIsAdmin(false);
-      }
-    });
+    // Check if user is admin via custom session
+    const session = getSession();
+    if (session && session.email === ADMIN_EMAIL) {
+      setIsAdmin(true);
+    } else {
+      setIsAdmin(false);
+    }
 
     supabase.from('listings')
       .select('*')
@@ -35,8 +33,6 @@ export default function HomePage() {
       }
       setLoading(false);
     });
-
-    return () => unsubscribe();
   }, []);
 
   return (
@@ -97,7 +93,7 @@ export default function HomePage() {
           </div>
         ) : (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {listings.map((l) => <ListingCard key={l._id || l.id} listing={l} />)}
+            {listings.map((l) => <ListingCard key={l.id} listing={l} />)}
           </div>
         )}
       </div>

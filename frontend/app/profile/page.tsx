@@ -2,9 +2,9 @@
 import { useEffect, useState, useRef } from 'react';
 import Link from 'next/link';
 import { Plus, Trash2, Eye, Camera } from 'lucide-react';
-import { auth } from '@/lib/firebase';
-import { onAuthStateChanged } from 'firebase/auth';
 import { supabase } from '@/lib/supabase';
+import { getSession } from '@/lib/auth';
+import { getImageUrl } from '@/lib/api';
 
 export default function ProfilePage() {
   const [user, setUser] = useState<any>(null);
@@ -15,15 +15,13 @@ export default function ProfilePage() {
   const avatarInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-      if (currentUser) {
-        fetchListings(currentUser.uid);
-      } else {
-        setLoading(false);
-      }
-    });
-    return () => unsub();
+    const session = getSession();
+    setUser(session);
+    if (session) {
+      fetchListings(session.id);
+    } else {
+      setLoading(false);
+    }
   }, []);
 
   const fetchListings = async (uid: string) => {
@@ -44,7 +42,7 @@ export default function ProfilePage() {
     setUploadingAvatar(true);
     try {
       const fileExt = file.name.split('.').pop();
-      const fileName = `${user.uid}-${Math.random()}.${fileExt}`;
+      const fileName = `${user.id}-${Math.random()}.${fileExt}`;
       const { data, error } = await supabase.storage.from('avatars').upload(fileName, file);
       if (error) throw error;
       // In a full implementation, you would update the user record in the database with the new avatar URL.
@@ -60,9 +58,9 @@ export default function ProfilePage() {
   const deleteListing = async (id: string) => {
     setDeletingId(id);
     try {
-      const { error } = await supabase.from('listings').delete().eq('_id', id);
+      const { error } = await supabase.from('listings').delete().eq('id', id);
       if (error) throw error;
-      setListings(prev => prev.filter(l => l._id !== id));
+      setListings(prev => prev.filter(l => l.id !== id));
     } catch (err: any) {
       alert(err.message || 'Failed to delete listing');
     } finally {
@@ -88,7 +86,7 @@ export default function ProfilePage() {
             className="w-20 h-20 bg-white text-orange-500 rounded-full flex items-center justify-center text-3xl font-bold cursor-pointer overflow-hidden border-4 border-white shadow-md hover:opacity-90 transition"
           >
             {user.avatar ? (
-              <img src={user.avatar.startsWith('http') ? user.avatar : `http://localhost:4000${user.avatar}`} alt="avatar" className="w-full h-full object-cover" />
+              <img src={getImageUrl(user.avatar)} alt="avatar" className="w-full h-full object-cover" />
             ) : (
               user.displayName?.[0]?.toUpperCase()
             )}
@@ -134,10 +132,10 @@ export default function ProfilePage() {
           {listings.map((l) => {
             const thumb = l.images?.[0]?.thumbnail;
             return (
-              <div key={l._id} className="bg-white rounded-xl shadow overflow-hidden group relative">
+              <div key={l.id} className="bg-white rounded-xl shadow overflow-hidden group relative">
                 <div className="aspect-square bg-gray-100 overflow-hidden">
                   {thumb ? (
-                    <img src={thumb.startsWith('http') ? thumb : `http://localhost:4000${thumb}`} alt={l.title} className="w-full h-full object-cover" />
+                    <img src={getImageUrl(thumb)} alt={l.title} className="w-full h-full object-cover" />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-4xl text-gray-300">📦</div>
                   )}
@@ -153,12 +151,12 @@ export default function ProfilePage() {
                   }`}>{l.status}</span>
                 </div>
                 <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition">
-                  <Link href={`/listings/${l._id}`} className="bg-white text-gray-600 p-1.5 rounded-lg shadow hover:bg-gray-50">
+                  <Link href={`/listings/${l.id}`} className="bg-white text-gray-600 p-1.5 rounded-lg shadow hover:bg-gray-50">
                     <Eye size={14} />
                   </Link>
                   <button
-                    onClick={() => deleteListing(l._id)}
-                    disabled={deletingId === l._id}
+                    onClick={() => deleteListing(l.id)}
+                    disabled={deletingId === l.id}
                     className="bg-white text-red-500 p-1.5 rounded-lg shadow hover:bg-red-50 disabled:opacity-50"
                   >
                     <Trash2 size={14} />

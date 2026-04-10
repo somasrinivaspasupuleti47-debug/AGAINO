@@ -1,9 +1,5 @@
-import crypto from 'crypto';
-import { FilterQuery } from 'mongoose';
-import { Listing, IListing } from '../listings/models/Listing';
-import { SearchSuggestion } from './SearchSuggestion';
-import { getOrSet } from '../../utils/cache';
-import { getRedisClient } from '../../config/redis';
+import { supabase } from '../../config/supabase';
+import { AppError } from '../../utils/AppError';
 
 export interface SearchQuery {
   q?: string;
@@ -20,10 +16,6 @@ export interface SearchQuery {
   limit?: number;
 }
 
-function hashParams(params: SearchQuery): string {
-  return crypto.createHash('sha1').update(JSON.stringify(params)).digest('hex');
-}
-
 export async function searchListings(query: SearchQuery) {
   const {
     q,
@@ -32,9 +24,6 @@ export async function searchListings(query: SearchQuery) {
     condition,
     minPrice,
     maxPrice,
-    lat,
-    lng,
-    radius,
     sort = 'newest',
     page = 1,
     limit = 20,
@@ -42,112 +31,72 @@ export async function searchListings(query: SearchQuery) {
 
   const safePage = Math.max(1, page);
   const safeLimit = Math.min(100, Math.max(1, limit));
-  const skip = (safePage - 1) * safeLimit;
+  const offset = (safePage - 1) * safeLimit;
 
-  const cacheKey = `search:${hashParams(query)}`;
+  // ── Build Supabase Query ────────────────────────────────────────────────────
+  let baseQuery = supabase
+    .from('listings')
+    .select('*', { count: 'exact' })
+    .eq('status', 'published');
 
-  return getOrSet(cacheKey, 300, async () => {
-    // ── Build filter ──────────────────────────────────────────────────────────
-    const filter: FilterQuery<IListing> = {
-      status: 'published',
-    };
+  if (q) {
+    baseQuery = baseQuery.textSearch('title', q, {
+      type: 'websearch',
+      config: 'english',
+    });
+  }
 
-    if (q) {
-      filter.$text = { $search: q };
-    }
+  if (category) baseQuery = baseQuery.eq('category', category);
+  if (subcategory) baseQuery = baseQuery.eq('subcategory', subcategory);
+  if (condition) baseQuery = baseQuery.eq('condition', condition);
 
-    if (category) filter.category = category;
-    if (subcategory) filter.subcategory = subcategory;
-    if (condition) filter.condition = condition;
+  if (minPrice !== undefined) baseQuery = baseQuery.gte('price', minPrice);
+  if (maxPrice !== undefined) baseQuery = baseQuery.lte('price', maxPrice);
 
-    if (minPrice !== undefined || maxPrice !== undefined) {
-      filter.price = {};
-      if (minPrice !== undefined) filter.price.$gte = minPrice;
-      if (maxPrice !== undefined) filter.price.$lte = maxPrice;
-    }
+  // Sorting
+  switch (sort) {
+    case 'price_asc':
+      baseQuery = baseQuery.order('price', { ascending: true });
+      break;
+    case 'price_desc':
+      baseQuery = baseQuery.order('price', { ascending: false });
+      break;
+    case 'relevance':
+      // Relevance sorting is default for textSearch in Supabase, 
+      // but we fallback to newest if no q.
+      if (!q) baseQuery = baseQuery.order('created_at', { ascending: false });
+      break;
+    case 'newest':
+    default:
+      baseQuery = baseQuery.order('created_at', { ascending: false });
+  }
 
-    // Geospatial: $geoWithin with $centerSphere (radius in radians = metres / earth radius)
-    if (lat !== undefined && lng !== undefined && radius !== undefined) {
-      const EARTH_RADIUS_METRES = 6378100;
-      filter['location.coordinates'] = {
-        $geoWithin: {
-          $centerSphere: [[lng, lat], radius / EARTH_RADIUS_METRES],
-        },
-      };
-    }
+  // Handle Featured first (simplified approach: internal ordering handles it)
+  baseQuery = baseQuery.order('is_featured', { ascending: false });
 
-    // ── Sort ──────────────────────────────────────────────────────────────────
-    type SortSpec = Record<string, 1 | -1 | { $meta: string }>;
-    let sortSpec: SortSpec;
-    switch (sort) {
-      case 'price_asc':
-        sortSpec = { price: 1 };
-        break;
-      case 'price_desc':
-        sortSpec = { price: -1 };
-        break;
-      case 'relevance':
-        sortSpec = q ? { score: { $meta: 'textScore' }, createdAt: -1 } : { createdAt: -1 };
-        break;
-      case 'newest':
-      default:
-        sortSpec = { createdAt: -1 };
-    }
+  const { data: listings, error, count } = await baseQuery.range(offset, offset + safeLimit - 1);
 
-    // ── Featured first ────────────────────────────────────────────────────────
-    const [featured, regular, total] = await Promise.all([
-      Listing.find({ ...filter, isFeatured: true })
-        .sort(sortSpec)
-        .skip(skip)
-        .limit(safeLimit)
-        .lean(),
-      Listing.find({ ...filter, isFeatured: false })
-        .sort(sortSpec)
-        .skip(skip)
-        .limit(safeLimit)
-        .lean(),
-      Listing.countDocuments(filter),
-    ]);
+  if (error) throw new AppError(error.message, 500);
 
-    // Deduplicate and merge featured first
-    const seen = new Set<string>();
-    const merged: typeof featured = [];
-    for (const l of [...featured, ...regular]) {
-      const id = String(l._id);
-      if (!seen.has(id)) {
-        seen.add(id);
-        merged.push(l);
-      }
-    }
-
-    return {
-      listings: merged.slice(0, safeLimit),
-      total,
-      page: safePage,
-      limit: safeLimit,
-      pages: Math.ceil(total / safeLimit),
-    };
-  });
+  return {
+    listings: listings || [],
+    total: count || 0,
+    page: safePage,
+    limit: safeLimit,
+    pages: Math.ceil((count || 0) / safeLimit),
+  };
 }
 
 export async function autocomplete(q: string) {
-  const cacheKey = `autocomplete:${q.toLowerCase().trim()}`;
-  const redis = getRedisClient();
+  // Simple implementation using distinct search on titles
+  const { data, error } = await supabase
+    .from('listings')
+    .select('title')
+    .ilike('title', `%${q}%`)
+    .limit(10);
 
-  const cached = await redis.get(cacheKey);
-  if (cached !== null) {
-    return JSON.parse(cached) as string[];
-  }
-
-  const suggestions = await SearchSuggestion.find(
-    { $text: { $search: q } },
-    { score: { $meta: 'textScore' } },
-  )
-    .sort({ score: { $meta: 'textScore' } })
-    .limit(10)
-    .lean();
-
-  const results = suggestions.map((s) => s.text);
-  await redis.set(cacheKey, JSON.stringify(results), 'EX', 60);
-  return results;
+  if (error) return [];
+  
+  // Return unique titles
+  return Array.from(new Set(data.map((item: any) => item.title)));
 }

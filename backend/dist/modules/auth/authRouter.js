@@ -27,8 +27,7 @@ exports.authRouter.get('/google/callback', passport_1.default.authenticate('goog
 }), async (req, res, next) => {
     try {
         const user = req.user;
-        const userId = user._id.toString();
-        const { accessToken, refreshToken } = await (0, authService_1.generateTokens)(userId, user.email, user.role);
+        const { accessToken, refreshToken } = await (0, authService_1.generateTokens)(user.id, user.email, user.role);
         res.redirect(`${env_1.env.FRONTEND_URL}/oauth/callback?accessToken=${accessToken}&refreshToken=${refreshToken}`);
     }
     catch (err) {

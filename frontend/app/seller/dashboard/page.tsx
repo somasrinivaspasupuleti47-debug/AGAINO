@@ -3,8 +3,8 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { auth } from '@/lib/firebase';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { getSession, logout as authLogout } from '@/lib/auth';
+import { getImageUrl } from '@/lib/api';
 import { supabase } from '@/lib/supabase';
 import {
   Plus, Package, Tag, MapPin, Trash2, Eye, LogOut,
@@ -34,7 +34,7 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 const STATUS_LABELS: Record<string, string> = {
-  approved: 'On Marketplace',
+  published: 'On Marketplace',
   approved:  'Approved (Pending Publish)',
   pending:   'Waiting for Approval',
   sold:      'Sold',
@@ -59,12 +59,10 @@ export default function SellerDashboard() {
   const [deleting, setDeleting] = useState<string | null>(null);
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (u) => {
-      if (!u) { router.push('/login'); return; }
-      setUser(u);
-      await fetchListings(u.uid);
-    });
-    return () => unsub();
+    const session = getSession();
+    if (!session) { router.push('/login'); return; }
+    setUser(session);
+    fetchListings(session.id);
   }, []);
 
   const fetchListings = async (uid: string) => {
@@ -84,17 +82,16 @@ export default function SellerDashboard() {
       alert('Approved or Published items cannot be deleted. Please contact support if you need to remove them.');
       return;
     }
-    const id = listing._id || listing.id;
+    const id = listing.id;
     if (!confirm('Delete this listing?')) return;
     setDeleting(id);
-    await supabase.from('listings').delete().eq('_id', id);
-    setListings(prev => prev.filter(l => (l._id || l.id) !== id));
+    await supabase.from('listings').delete().eq('id', id);
+    setListings(prev => prev.filter(l => l.id !== id));
     setDeleting(null);
   };
 
-  const handleLogout = async () => {
-    await signOut(auth);
-    router.push('/');
+  const handleLogout = () => {
+    authLogout();
   };
 
   /* ── stats ── */
@@ -115,7 +112,7 @@ export default function SellerDashboard() {
   const imgSrc = (l: Listing) => {
     const img = l.images?.[0]?.original;
     if (!img) return null;
-    return img.startsWith('http') ? img : `http://localhost:4000${img}`;
+    return getImageUrl(img);
   };
 
   return (
@@ -218,7 +215,7 @@ export default function SellerDashboard() {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
               <AnimatePresence>
                 {listings.map((listing, i) => {
-                  const lid = listing._id || listing.id;
+                  const lid = listing.id;
                   const src = imgSrc(listing);
                   return (
                     <motion.div

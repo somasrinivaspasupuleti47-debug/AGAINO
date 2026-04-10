@@ -1,4 +1,3 @@
-import { IListing } from '../listings/models/Listing';
 export interface SearchQuery {
     q?: string;
     category?: string;
@@ -14,15 +13,11 @@ export interface SearchQuery {
     limit?: number;
 }
 export declare function searchListings(query: SearchQuery): Promise<{
-    listings: (import("mongoose").FlattenMaps<IListing> & Required<{
-        _id: import("mongoose").Types.ObjectId;
-    }> & {
-        __v: number;
-    })[];
+    listings: any[];
     total: number;
     page: number;
     limit: number;
     pages: number;
 }>;
-export declare function autocomplete(q: string): Promise<string[]>;
+export declare function autocomplete(q: string): Promise<any[]>;
 //# sourceMappingURL=searchService.d.ts.map

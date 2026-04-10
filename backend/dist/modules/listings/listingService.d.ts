@@ -1,4 +1,3 @@
-import { Types } from 'mongoose';
 import { z } from 'zod';
 export declare const createListingSchema: z.ZodObject<{
     title: z.ZodString;
@@ -48,29 +47,29 @@ export declare const createListingSchema: z.ZodObject<{
     expiresAt: z.ZodOptional<z.ZodDate>;
     isFeatured: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
 }, "strip", z.ZodTypeAny, {
-    description: string;
     title: string;
+    description: string;
     price: number;
     category: string;
     subcategory: string;
     condition: "new" | "used";
-    isFeatured: boolean;
+    location: {
+        city: string;
+        region: string;
+        coordinates?: {
+            type: "Point";
+            coordinates: [number, number];
+        } | undefined;
+    };
     images: {
         original: string;
         thumbnail: string;
     }[];
-    location: {
-        city: string;
-        region: string;
-        coordinates?: {
-            type: "Point";
-            coordinates: [number, number];
-        } | undefined;
-    };
+    isFeatured: boolean;
     expiresAt?: Date | undefined;
 }, {
-    description: string;
     title: string;
+    description: string;
     price: number;
     category: string;
     subcategory: string;
@@ -83,12 +82,12 @@ export declare const createListingSchema: z.ZodObject<{
             coordinates: [number, number];
         } | undefined;
     };
-    expiresAt?: Date | undefined;
-    isFeatured?: boolean | undefined;
     images?: {
         original: string;
         thumbnail: string;
     }[] | undefined;
+    expiresAt?: Date | undefined;
+    isFeatured?: boolean | undefined;
 }>;
 export declare const updateListingSchema: z.ZodObject<{
     title: z.ZodOptional<z.ZodString>;
@@ -138,18 +137,12 @@ export declare const updateListingSchema: z.ZodObject<{
     expiresAt: z.ZodOptional<z.ZodOptional<z.ZodDate>>;
     isFeatured: z.ZodOptional<z.ZodDefault<z.ZodOptional<z.ZodBoolean>>>;
 }, "strip", z.ZodTypeAny, {
-    description?: string | undefined;
-    expiresAt?: Date | undefined;
     title?: string | undefined;
+    description?: string | undefined;
     price?: number | undefined;
     category?: string | undefined;
     subcategory?: string | undefined;
     condition?: "new" | "used" | undefined;
-    isFeatured?: boolean | undefined;
-    images?: {
-        original: string;
-        thumbnail: string;
-    }[] | undefined;
     location?: {
         city: string;
         region: string;
@@ -158,19 +151,19 @@ export declare const updateListingSchema: z.ZodObject<{
             coordinates: [number, number];
         } | undefined;
     } | undefined;
+    images?: {
+        original: string;
+        thumbnail: string;
+    }[] | undefined;
+    expiresAt?: Date | undefined;
+    isFeatured?: boolean | undefined;
 }, {
-    description?: string | undefined;
-    expiresAt?: Date | undefined;
     title?: string | undefined;
+    description?: string | undefined;
     price?: number | undefined;
     category?: string | undefined;
     subcategory?: string | undefined;
     condition?: "new" | "used" | undefined;
-    isFeatured?: boolean | undefined;
-    images?: {
-        original: string;
-        thumbnail: string;
-    }[] | undefined;
     location?: {
         city: string;
         region: string;
@@ -179,53 +172,30 @@ export declare const updateListingSchema: z.ZodObject<{
             coordinates: [number, number];
         } | undefined;
     } | undefined;
+    images?: {
+        original: string;
+        thumbnail: string;
+    }[] | undefined;
+    expiresAt?: Date | undefined;
+    isFeatured?: boolean | undefined;
 }>;
 export type CreateListingInput = z.infer<typeof createListingSchema>;
 export type UpdateListingInput = z.infer<typeof updateListingSchema>;
 type ListingStatus = 'draft' | 'published' | 'sold' | 'archived';
 export declare function canTransition(from: ListingStatus, to: ListingStatus, isAdmin: boolean): boolean;
-export declare function invalidateListingCache(listingId: string): Promise<void>;
-export declare function createListing(sellerId: string, data: CreateListingInput): Promise<import("mongoose").Document<unknown, {}, import("./models/Listing").IListing, {}, {}> & import("./models/Listing").IListing & Required<{
-    _id: Types.ObjectId;
-}> & {
-    __v: number;
-}>;
-export declare function updateListing(listingId: string, sellerId: string, data: UpdateListingInput, isAdmin: boolean): Promise<import("mongoose").Document<unknown, {}, import("./models/Listing").IListing, {}, {}> & import("./models/Listing").IListing & Required<{
-    _id: Types.ObjectId;
-}> & {
-    __v: number;
-}>;
+export declare function createListing(sellerId: string, data: CreateListingInput): Promise<any>;
+export declare function updateListing(listingId: string, sellerId: string, data: UpdateListingInput, isAdmin: boolean): Promise<any>;
 export declare function deleteListing(listingId: string, sellerId: string): Promise<void>;
-export declare function getMyListings(sellerId: string): Promise<(import("mongoose").Document<unknown, {}, import("./models/Listing").IListing, {}, {}> & import("./models/Listing").IListing & Required<{
-    _id: Types.ObjectId;
-}> & {
-    __v: number;
-})[]>;
-export declare function publishListing(listingId: string, sellerId: string): Promise<import("mongoose").Document<unknown, {}, import("./models/Listing").IListing, {}, {}> & import("./models/Listing").IListing & Required<{
-    _id: Types.ObjectId;
-}> & {
-    __v: number;
-}>;
-export declare function markSold(listingId: string, sellerId: string): Promise<import("mongoose").Document<unknown, {}, import("./models/Listing").IListing, {}, {}> & import("./models/Listing").IListing & Required<{
-    _id: Types.ObjectId;
-}> & {
-    __v: number;
-}>;
+export declare function getMyListings(sellerId: string): Promise<any[]>;
+export declare function publishListing(listingId: string, sellerId: string): Promise<any>;
+export declare function markSold(listingId: string, sellerId: string): Promise<any>;
 export declare function getPublicFeed(page: number, limit: number): Promise<{
-    listings: (import("mongoose").Document<unknown, {}, import("./models/Listing").IListing, {}, {}> & import("./models/Listing").IListing & Required<{
-        _id: Types.ObjectId;
-    }> & {
-        __v: number;
-    })[];
+    listings: any[];
     total: number;
     page: number;
     limit: number;
     pages: number;
 }>;
-export declare function getListingById(id: string): Promise<import("mongoose").Document<unknown, {}, import("./models/Listing").IListing, {}, {}> & import("./models/Listing").IListing & Required<{
-    _id: Types.ObjectId;
-}> & {
-    __v: number;
-}>;
+export declare function getListingById(id: string): Promise<any>;
 export {};
 //# sourceMappingURL=listingService.d.ts.map
