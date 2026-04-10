@@ -10,7 +10,7 @@ export default function LoginPage() {
   const router = useRouter();
   const [role, setRole] = useState<'buyer' | 'seller'>('buyer');
   const [form, setForm] = useState({ email: '', password: '' });
-  const [error, setError] = useState('');
+  const [error, setError] = useState<React.ReactNode>('');
   const [loading, setLoading] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
@@ -143,7 +143,7 @@ export default function LoginPage() {
           </div>
         </div>
 
-        {error && <p className="bg-red-50 text-red-500 text-sm p-3 rounded-lg mb-4">{error}</p>}
+        {error && <div className="bg-red-50 text-red-500 text-sm p-3 rounded-lg mb-4">{error}</div>}
 
         <form onSubmit={submit} className="space-y-4">
           <input
